@@ -42,18 +42,25 @@ export function AddPaymentForm() {
   const [vendorId, setVendorId] = useState<string>("none")
   const [billId, setBillId] = useState<string>("none")
   const [amount, setAmount] = useState<string>("")
+  const [paymentMode, setPaymentMode] = useState<"cash" | "upi">("upi")
   const [errorText, setErrorText] = useState<string | null>(null)
   const [successText, setSuccessText] = useState<string | null>(null)
 
   const vendorsQuery = useQuery({
     queryKey: ["vendors", userId],
     queryFn: () => getVendors(userId),
+    staleTime: 2 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
   })
 
   const vendorBillsQuery = useQuery({
     queryKey: ["vendor-bills", userId, vendorId],
     enabled: vendorId !== "none",
     queryFn: () => getVendorBills(userId, vendorId),
+    staleTime: 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
   })
 
   const unpaidBills = useMemo(() => {
@@ -61,14 +68,15 @@ export function AddPaymentForm() {
   }, [vendorBillsQuery.data])
 
   const addPaymentMutation = useMutation({
-    mutationFn: (payload: { vendorId: string; billId: string; amount: number }) =>
+    mutationFn: (payload: { vendorId: string; billId: string; amount: number; paymentMode: "cash" | "upi" }) =>
       addPayment(userId, payload),
     onSuccess: async () => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["payment-logs", userId] }),
+        queryClient.invalidateQueries({ queryKey: ["payments", userId] }),
         queryClient.invalidateQueries({ queryKey: ["vendor-bills", userId] }),
         queryClient.invalidateQueries({ queryKey: ["payment-suggestion", userId] }),
         queryClient.invalidateQueries({ queryKey: ["payment-suggestion-bills", userId] }),
+        queryClient.invalidateQueries({ queryKey: ["daily-paid-entries", userId] }),
         queryClient.invalidateQueries({ queryKey: ["vendors-hydrated", userId] }),
       ])
     },
@@ -90,11 +98,21 @@ export function AddPaymentForm() {
       return
     }
 
+    const selectedBill = unpaidBills.find((bill) => bill.id === billId)
+    if (selectedBill) {
+      const pending = pendingAmount(selectedBill)
+      if (numericAmount > pending) {
+        setErrorText(`Amount exceeds pending bill amount (₹${pending.toLocaleString("en-IN")})`)
+        return
+      }
+    }
+
     try {
       await addPaymentMutation.mutateAsync({
         vendorId,
         billId,
         amount: numericAmount,
+        paymentMode,
       })
       setSuccessText("Payment added successfully")
       setAmount("")
@@ -114,7 +132,7 @@ export function AddPaymentForm() {
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <form onSubmit={handleSubmit} className="grid gap-3 md:grid-cols-4">
+        <form onSubmit={handleSubmit} className="grid gap-3 md:grid-cols-5">
           <div className="md:col-span-1">
             <Select
               value={vendorId}
@@ -169,6 +187,18 @@ export function AddPaymentForm() {
               onChange={(event) => setAmount(event.target.value)}
               className="bg-secondary pl-9"
             />
+          </div>
+
+          <div className="md:col-span-1">
+            <Select value={paymentMode} onValueChange={(value: "cash" | "upi") => setPaymentMode(value)}>
+              <SelectTrigger className="bg-secondary">
+                <SelectValue placeholder="Payment mode" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="upi">UPI</SelectItem>
+                <SelectItem value="cash">Cash</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           <Button

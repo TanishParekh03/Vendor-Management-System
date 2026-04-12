@@ -4,11 +4,13 @@ const {
     createPayment,
     getPaymentsForUser,
     getPaymentsForVendor,
-    getPaymentsForBill
+    getPaymentsForBill,
+    getPaymentSuggestion
 } = require('../Controller/payments')
 
 router.post('/users/:userId/payments', createPayment)
 router.get('/users/:userId/payments', getPaymentsForUser)
+router.get('/users/:userId/payment-suggestion', getPaymentSuggestion)
 router.get('/users/:userId/vendors/:vendorId/payments', getPaymentsForVendor)
 router.get('/users/:userId/bills/:billId/payments', getPaymentsForBill)
 

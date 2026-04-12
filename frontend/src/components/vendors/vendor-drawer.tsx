@@ -19,7 +19,7 @@ import {
   ApiRequestError,
   type BackendBill,
   type BackendCommodity,
-  type BackendPaymentLog,
+  type BackendPayment,
 } from "@/lib/api"
 import { VendorCommodityManager } from "./vendor-commodity-manager"
 
@@ -35,7 +35,7 @@ type UiVendor = {
   outstandingBalance: number
   toleranceLevel: "LOW" | "MEDIUM" | "HIGH"
   bills: BackendBill[]
-  payments: BackendPaymentLog[]
+  payments: BackendPayment[]
 }
 
 interface VendorDrawerProps {
@@ -338,7 +338,7 @@ export function VendorDrawer({
                                 {payment.payment_mode.toUpperCase()} payment
                               </p>
                               <p className="font-mono text-sm text-red-300">
-                                -₹{asNumber(payment.amount_paid).toLocaleString("en-IN")}
+                                -₹{asNumber(payment.amount).toLocaleString("en-IN")}
                               </p>
                             </div>
                             <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">

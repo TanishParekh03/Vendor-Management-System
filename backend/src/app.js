@@ -5,12 +5,12 @@ const cors = require("cors")
 const userRoutes = require('./routes/users');
 const vendorRoutes = require('./routes/vendors');
 const commodityRoutes = require('./routes/commodities');
-const userProfiles =  require("./routes/userProfiles")
+const userProfiles = require("./routes/userProfiles")
 const registerAndLoginRoutes = require('./routes/registerAndLogin')
 const purchaseRoutes = require("./routes/purchase")
 const vendorCommodityRoutes = require("./routes/vendorCommodity")
 const billRoutes = require("./routes/bills")
-const paymentLogRoutes = require("./routes/paymentLogs")
+const dailyLogRoutes = require("./routes/dailyLogs")
 
 const paymentRoutes = require("./routes/payments")
 
@@ -28,7 +28,7 @@ app.use(userProfiles);
 app.use(purchaseRoutes)
 app.use(vendorCommodityRoutes)
 app.use(billRoutes)
-app.use(paymentLogRoutes)
+app.use(dailyLogRoutes)
 
 app.use(paymentRoutes)
 

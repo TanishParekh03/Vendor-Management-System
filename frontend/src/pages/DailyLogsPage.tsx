@@ -1,6 +1,17 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowDownCircle, ArrowUpCircle, ClipboardList, Plus, RefreshCw, Trash2 } from "lucide-react"
+import { ArrowDownCircle, ArrowUpCircle, ClipboardList, Plus, RefreshCw, Trash2, TrendingUp } from "lucide-react"
+import {
+  Bar,
+  CartesianGrid,
+  ComposedChart,
+  Legend,
+  Line,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts"
 import { DashboardLayout } from "@/components/dashboard/dashboard-layout"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -15,15 +26,15 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import {
-  addPayment,
   ApiRequestError,
   getCommodities,
   getCurrentUserId,
+  getDailyLogAnalytics,
   getPayments,
-  getVendorBills,
   getVendors,
-  type BackendBill,
-  type BackendCommodity,
+  type BackendPayment,
+  type BackendDailyLogAnalyticsResponse,
+  type DailyLogAnalyticsView,
   updateCommodityQuantity,
 } from "@/lib/api"
 import {
@@ -35,6 +46,8 @@ import { addReceivedLog, getReceivedLogs, type ReceivedDailyLog } from "@/lib/da
 import { cn } from "@/lib/utils"
 
 type LogType = "paid" | "received"
+
+type AnalyticsView = DailyLogAnalyticsView
 
 type CommodityUpdateDraft = {
   id: string
@@ -50,6 +63,24 @@ type DailyPreviewLog = {
   vendorName: string
   billId: string | null
   note?: string
+}
+
+type TodayPaidEntry = {
+  id: string
+  vendorName: string
+  billId: string
+  amount: number
+  method: string
+  paymentDate: string
+}
+
+type UnifiedPaidEntry = {
+  id: string
+  vendor_id: string
+  bill_id: string
+  amount: number
+  payment_date?: string
+  payment_mode: string
 }
 
 let commodityDraftSeed = 0
@@ -68,8 +99,19 @@ function asNumber(value: number | string): number {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
-function pendingAmount(bill: BackendBill): number {
-  return Math.max(asNumber(bill.total_amount) - asNumber(bill.paid_amount), 0)
+function shortBillId(id: string): string {
+  return String(id).slice(-6).toUpperCase()
+}
+
+function normalizePayment(entry: BackendPayment): UnifiedPaidEntry {
+  return {
+    id: `payment-${entry.id}`,
+    vendor_id: entry.vendor_id,
+    bill_id: entry.bill_id,
+    amount: asNumber(entry.amount),
+    payment_date: entry.payment_date,
+    payment_mode: String(entry.payment_mode).toUpperCase(),
+  }
 }
 
 function formatDate(input?: string): string {
@@ -106,45 +148,102 @@ function formatDateTime(input?: string): string {
   })
 }
 
+function getLocalDateValue(date = new Date()): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
+
+function getLocalMonthValue(date = new Date()): string {
+  return getLocalDateValue(date).slice(0, 7)
+}
+
+function getTrendTone(trend: BackendDailyLogAnalyticsResponse["summary"]["trend_direction"]): string {
+  if (trend === "improving") return "text-emerald-300"
+  if (trend === "declining") return "text-rose-300"
+  return "text-amber-300"
+}
+
+function getInsightStyle(type: "good" | "warning" | "neutral"): string {
+  if (type === "good") {
+    return "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+  }
+  if (type === "warning") {
+    return "border-rose-500/30 bg-rose-500/10 text-rose-200"
+  }
+  return "border-cyan-500/30 bg-cyan-500/10 text-cyan-200"
+}
+
 export default function DailyLogsPage() {
   const queryClient = useQueryClient()
   const userId = getCurrentUserId()
 
   const [logType, setLogType] = useState<LogType>("received")
   const [amount, setAmount] = useState("")
-  const [vendorId, setVendorId] = useState<string>("none")
-  const [billId, setBillId] = useState<string>("none")
   const [commodityRows, setCommodityRows] = useState<CommodityUpdateDraft[]>([createCommodityDraft()])
   const [commodityTotals, setCommodityTotals] = useState<Record<string, number>>({})
   const [financeErrorText, setFinanceErrorText] = useState<string | null>(null)
   const [financeSuccessText, setFinanceSuccessText] = useState<string | null>(null)
   const [commodityErrorText, setCommodityErrorText] = useState<string | null>(null)
   const [commoditySuccessText, setCommoditySuccessText] = useState<string | null>(null)
+  const [analyticsView, setAnalyticsView] = useState<AnalyticsView>("monthly")
+  const [selectedDate, setSelectedDate] = useState<string>(() => getLocalDateValue())
+  const [selectedMonth, setSelectedMonth] = useState<string>(() => getLocalMonthValue())
+  const [selectedYear, setSelectedYear] = useState<string>(() => String(new Date().getFullYear()))
+  const parsedSelectedYear = Number(selectedYear)
+  const isYearValid = Number.isInteger(parsedSelectedYear) && parsedSelectedYear >= 2000 && parsedSelectedYear <= 2200
 
   const vendorsQuery = useQuery({
     queryKey: ["vendors", userId],
     queryFn: () => getVendors(userId),
-  })
-
-  const vendorBillsQuery = useQuery({
-    queryKey: ["vendor-bills", userId, vendorId],
-    enabled: vendorId !== "none",
-    queryFn: () => getVendorBills(userId, vendorId),
+    staleTime: 2 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
   })
 
   const commoditiesQuery = useQuery({
     queryKey: ["commodities", userId],
     queryFn: () => getCommodities(userId),
+    staleTime: 2 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
   })
 
   const receivedLogsQuery = useQuery({
     queryKey: ["daily-received-logs", userId],
     queryFn: async () => getReceivedLogs(userId),
+    staleTime: 45 * 1000,
+    gcTime: 8 * 60 * 1000,
+    refetchOnWindowFocus: false,
   })
 
   const paidLogsQuery = useQuery({
-    queryKey: ["payments", userId],
-    queryFn: () => getPayments(userId),
+    queryKey: ["daily-paid-entries", userId],
+    queryFn: async () => getPayments(userId).then((payments) =>
+      payments
+        .map(normalizePayment)
+        .sort((a, b) => new Date(b.payment_date ?? "").getTime() - new Date(a.payment_date ?? "").getTime())
+    ),
+    staleTime: 45 * 1000,
+    gcTime: 8 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  })
+
+  const analyticsQuery = useQuery({
+    queryKey: ["daily-log-analytics", userId, analyticsView, selectedDate, selectedMonth, selectedYear],
+    enabled: analyticsView !== "yearly" || isYearValid,
+    queryFn: async () =>
+      getDailyLogAnalytics(userId, {
+        view: analyticsView,
+        date: analyticsView === "daily" ? selectedDate : undefined,
+        month: analyticsView === "monthly" ? selectedMonth : undefined,
+        year: analyticsView === "yearly" && isYearValid ? parsedSelectedYear : undefined,
+        limit: analyticsView === "yearly" ? 5000 : 2500,
+      }),
+      staleTime: 30 * 1000,
+      gcTime: 6 * 60 * 1000,
+      refetchOnWindowFocus: false,
   })
 
   useEffect(() => {
@@ -154,10 +253,6 @@ export default function DailyLogsPage() {
 
     setCommodityTotals(updateTotalsFromCommodities(userId, commoditiesQuery.data))
   }, [userId, commoditiesQuery.data])
-
-  const unpaidBills = useMemo(() => {
-    return (vendorBillsQuery.data ?? []).filter((bill) => pendingAmount(bill) > 0)
-  }, [vendorBillsQuery.data])
 
   const logsPreview = useMemo<DailyPreviewLog[]>(() => {
     const vendorNameById = new Map((vendorsQuery.data ?? []).map((vendor) => [vendor.id, vendor.name]))
@@ -169,6 +264,7 @@ export default function DailyLogsPage() {
       type: "paid",
       vendorName: vendorNameById.get(log.vendor_id) ?? `Vendor #${log.vendor_id}`,
       billId: log.bill_id,
+      note: `Method: ${log.payment_mode}`,
     }))
 
     const receivedLogs: DailyPreviewLog[] = (receivedLogsQuery.data ?? []).slice(0, 5).map((log: ReceivedDailyLog) => ({
@@ -187,36 +283,19 @@ export default function DailyLogsPage() {
   }, [paidLogsQuery.data, receivedLogsQuery.data, vendorsQuery.data])
 
   const financialMutation = useMutation({
-    mutationFn: async (payload: {
-      logType: LogType
-      amount: number
-      vendorId?: string
-      billId?: string
-    }) => {
-      if (payload.logType === "paid") {
-        if (!payload.vendorId || !payload.billId) {
-          throw new Error("Vendor and bill are required for paid entries")
-        }
-
-        await addPayment(userId, {
-          vendorId: payload.vendorId,
-          billId: payload.billId,
-          amount: payload.amount,
-        })
-      } else {
-        addReceivedLog({
-          userId,
-          amount: payload.amount,
-          date: new Date().toISOString(),
-        })
-      }
+    mutationFn: async (payload: { amount: number }) => {
+      return addReceivedLog({
+        userId,
+        amount: payload.amount,
+        date: new Date().toISOString(),
+      })
     },
     onSuccess: async () => {
       await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["daily-paid-entries", userId] }),
         queryClient.invalidateQueries({ queryKey: ["payments", userId] }),
-        queryClient.invalidateQueries({ queryKey: ["payment-logs", userId] }),
-        queryClient.invalidateQueries({ queryKey: ["vendor-bills", userId] }),
         queryClient.invalidateQueries({ queryKey: ["daily-received-logs", userId] }),
+        queryClient.invalidateQueries({ queryKey: ["daily-log-analytics", userId] }),
       ])
     },
   })
@@ -277,23 +356,17 @@ export default function DailyLogsPage() {
       return
     }
 
-    if (logType === "paid" && (vendorId === "none" || billId === "none")) {
-      setFinanceErrorText("Select vendor and bill for paid entry")
+    if (logType === "paid") {
+      setFinanceErrorText("Paid logs are auto-fetched from payment logs. Use Received to add entries.")
       return
     }
 
     try {
       await financialMutation.mutateAsync({
-        logType,
         amount: numericAmount,
-        vendorId: vendorId !== "none" ? vendorId : undefined,
-        billId: billId !== "none" ? billId : undefined,
       })
 
       setAmount("")
-      if (logType === "paid") {
-        setBillId("none")
-      }
       setFinanceSuccessText("Financial log saved successfully")
     } catch (error) {
       const message =
@@ -351,34 +424,84 @@ export default function DailyLogsPage() {
       return isSameLocalDate(new Date(payment.payment_date), today)
     })
 
-    const totalAmount = todayPayments.reduce((sum, payment) => sum + asNumber(payment.amount), 0)
+    const totalOutflow = todayPayments.reduce((sum, payment) => sum + asNumber(payment.amount), 0)
     const byVendor = new Map<string, { vendorName: string; amount: number; count: number }>()
+    const byMethod = new Map<string, { method: string; amount: number; count: number }>()
+    const payments: TodayPaidEntry[] = []
 
     for (const payment of todayPayments) {
       const vendorName = vendorNameById.get(payment.vendor_id) ?? `Vendor #${payment.vendor_id}`
       const current = byVendor.get(payment.vendor_id)
+      const method = String(payment.payment_mode).toUpperCase()
+      const methodCurrent = byMethod.get(method)
+      const paymentAmount = asNumber(payment.amount)
+
+      payments.push({
+        id: payment.id,
+        vendorName,
+        billId: payment.bill_id,
+        amount: paymentAmount,
+        method,
+        paymentDate: payment.payment_date ?? "",
+      })
 
       if (!current) {
         byVendor.set(payment.vendor_id, {
           vendorName,
-          amount: asNumber(payment.amount),
+          amount: paymentAmount,
           count: 1,
         })
-        continue
+      } else {
+        current.amount += paymentAmount
+        current.count += 1
+        byVendor.set(payment.vendor_id, current)
       }
 
-      current.amount += asNumber(payment.amount)
-      current.count += 1
-      byVendor.set(payment.vendor_id, current)
+      if (!methodCurrent) {
+        byMethod.set(method, {
+          method,
+          amount: paymentAmount,
+          count: 1,
+        })
+      } else {
+        methodCurrent.amount += paymentAmount
+        methodCurrent.count += 1
+        byMethod.set(method, methodCurrent)
+      }
     }
 
     return {
       count: todayPayments.length,
-      totalAmount,
-      payments: todayPayments,
+      totalOutflow,
+      payments: payments.sort(
+        (left, right) => new Date(right.paymentDate).getTime() - new Date(left.paymentDate).getTime()
+      ),
       vendorBreakdown: Array.from(byVendor.values()).sort((a, b) => b.amount - a.amount),
+      methodBreakdown: Array.from(byMethod.values()).sort((a, b) => b.amount - a.amount),
     }
   }, [paidLogsQuery.data, vendorsQuery.data])
+
+  const analyticsSeries = analyticsQuery.data?.series ?? []
+  const analyticsLogs = analyticsQuery.data?.logs ?? []
+
+  const analyticsChartData = useMemo(
+    () =>
+      analyticsSeries.map((entry) => ({
+        bucketLabel: entry.bucket_label,
+        received: entry.received,
+        paid: entry.paid,
+        net: entry.net,
+        transactions: entry.transactions,
+      })),
+    [analyticsSeries]
+  )
+
+  const analyticsErrorText =
+    analyticsQuery.error instanceof ApiRequestError
+      ? analyticsQuery.error.message
+      : analyticsQuery.error instanceof Error
+        ? analyticsQuery.error.message
+        : "Unable to load insights for the selected period"
 
   const upsertCommodityRow = (draftId: string, updater: (draft: CommodityUpdateDraft) => CommodityUpdateDraft) => {
     setCommodityRows((prev) => prev.map((draft) => (draft.id === draftId ? updater(draft) : draft)))
@@ -449,19 +572,21 @@ export default function DailyLogsPage() {
                   </div>
                 </div>
 
-                <div className="space-y-2 md:col-span-1">
-                  <Label htmlFor="daily-log-amount">Amount</Label>
-                  <Input
-                    id="daily-log-amount"
-                    type="number"
-                    min={1}
-                    step={1}
-                    placeholder="0"
-                    value={amount}
-                    onChange={(event) => setAmount(event.target.value)}
-                    className="bg-secondary"
-                  />
-                </div>
+                {logType === "received" && (
+                  <div className="space-y-2 md:col-span-1">
+                    <Label htmlFor="daily-log-amount">Amount</Label>
+                    <Input
+                      id="daily-log-amount"
+                      type="number"
+                      min={1}
+                      step={1}
+                      placeholder="0"
+                      value={amount}
+                      onChange={(event) => setAmount(event.target.value)}
+                      className="bg-secondary"
+                    />
+                  </div>
+                )}
               </div>
 
               {logType === "paid" && (
@@ -473,8 +598,9 @@ export default function DailyLogsPage() {
                     </Badge>
                   </div>
                   <div className="mb-2 flex flex-wrap gap-3 text-sm text-rose-100">
-                    <span>Total Paid Today: ₹{todayPaidSummary.totalAmount.toLocaleString("en-IN")}</span>
+                    <span>Total Outflow Today: ₹{todayPaidSummary.totalOutflow.toLocaleString("en-IN")}</span>
                     <span>Vendors Covered: {todayPaidSummary.vendorBreakdown.length}</span>
+                    <span>Methods Used: {todayPaidSummary.methodBreakdown.length}</span>
                   </div>
 
                   <div className="space-y-1">
@@ -493,74 +619,50 @@ export default function DailyLogsPage() {
                       <p className="text-xs text-rose-200/80">No payments recorded for today yet.</p>
                     )}
                   </div>
-                </div>
-              )}
 
-              {logType === "paid" && (
-                <div className="grid gap-3 rounded-lg border border-border/50 bg-secondary/20 p-3 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label>Vendor</Label>
-                    <Select
-                      value={vendorId}
-                      onValueChange={(value) => {
-                        setVendorId(value)
-                        setBillId("none")
-                      }}
-                    >
-                      <SelectTrigger className="bg-secondary">
-                        <SelectValue placeholder="Select vendor" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Select Vendor</SelectItem>
-                        {(vendorsQuery.data ?? []).map((vendor) => (
-                          <SelectItem key={vendor.id} value={vendor.id}>
-                            {vendor.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Bill</Label>
-                    <Select
-                      value={billId}
-                      onValueChange={setBillId}
-                      disabled={vendorId === "none" || vendorBillsQuery.isLoading}
-                    >
-                      <SelectTrigger className="bg-secondary">
-                        <SelectValue placeholder="Select bill" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Select Bill</SelectItem>
-                        {unpaidBills.map((bill) => (
-                          <SelectItem key={bill.id} value={bill.id}>
-                            #{bill.id} • Pending ₹{pendingAmount(bill).toLocaleString("en-IN")}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                  <div className="mt-3">
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-rose-200">
+                      By Payment Method
+                    </p>
+                    <div className="space-y-1">
+                      {todayPaidSummary.methodBreakdown.map((method) => (
+                        <div
+                          key={method.method}
+                          className="flex items-center justify-between rounded-md border border-rose-500/20 bg-rose-500/5 px-2 py-1.5 text-xs"
+                        >
+                          <span className="text-rose-100">{method.method}</span>
+                          <span className="font-mono text-rose-200">
+                            ₹{method.amount.toLocaleString("en-IN")} ({method.count})
+                          </span>
+                        </div>
+                      ))}
+                      {todayPaidSummary.methodBreakdown.length === 0 && (
+                        <p className="text-xs text-rose-200/80">No method data found for today.</p>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
 
               <div className="flex items-center gap-2">
-                <Button
-                  type="submit"
-                  disabled={financialMutation.isPending}
-                  className="bg-cyan-600 text-white hover:bg-cyan-700"
-                >
-                  {financialMutation.isPending ? "Saving..." : "Save Financial Log"}
-                </Button>
+                {logType === "received" && (
+                  <Button
+                    type="submit"
+                    disabled={financialMutation.isPending}
+                    className="bg-cyan-600 text-white hover:bg-cyan-700"
+                  >
+                    {financialMutation.isPending ? "Saving..." : "Save Financial Log"}
+                  </Button>
+                )}
                 <Button
                   type="button"
                   variant="outline"
                   onClick={() => {
                     void Promise.all([
                       vendorsQuery.refetch(),
-                      vendorBillsQuery.refetch(),
                       paidLogsQuery.refetch(),
                       receivedLogsQuery.refetch(),
+                      analyticsQuery.refetch(),
                     ])
                   }}
                   className="border-border/60 bg-secondary"
@@ -715,9 +817,270 @@ export default function DailyLogsPage() {
 
         <Card className="border-border/50 bg-card">
           <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-lg text-card-foreground">
+              <TrendingUp className="h-5 w-5 text-indigo-300" />
+              Past Logs Analytics
+            </CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Select a period to view meaningful trends, grouped charts, and actionable insights from real cashflow logs.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-[220px_1fr_auto]">
+              <div className="space-y-2">
+                <Label>View</Label>
+                <Select value={analyticsView} onValueChange={(value) => setAnalyticsView(value as AnalyticsView)}>
+                  <SelectTrigger className="bg-secondary">
+                    <SelectValue placeholder="Select view" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="daily">Daily</SelectItem>
+                    <SelectItem value="monthly">Monthly</SelectItem>
+                    <SelectItem value="yearly">Yearly</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Period</Label>
+                {analyticsView === "daily" && (
+                  <Input
+                    type="date"
+                    value={selectedDate}
+                    onChange={(event) => setSelectedDate(event.target.value)}
+                    className="bg-secondary"
+                  />
+                )}
+                {analyticsView === "monthly" && (
+                  <Input
+                    type="month"
+                    value={selectedMonth}
+                    onChange={(event) => setSelectedMonth(event.target.value)}
+                    className="bg-secondary"
+                  />
+                )}
+                {analyticsView === "yearly" && (
+                  <div className="space-y-1">
+                    <Input
+                      type="number"
+                      min={2000}
+                      max={2200}
+                      value={selectedYear}
+                      onChange={(event) => setSelectedYear(event.target.value)}
+                      className="bg-secondary"
+                    />
+                    {!isYearValid && (
+                      <p className="text-xs text-rose-300">Enter a year between 2000 and 2200.</p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void analyticsQuery.refetch()}
+                  className="border-border/60 bg-secondary"
+                >
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Refresh Period
+                </Button>
+              </div>
+            </div>
+
+            {analyticsQuery.isLoading && (
+              <div className="rounded-lg border border-border/50 bg-secondary/20 p-4 text-sm text-muted-foreground">
+                Loading chart data and insights...
+              </div>
+            )}
+
+            {analyticsQuery.isError && (
+              <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">
+                {analyticsErrorText}
+              </div>
+            )}
+
+            {!analyticsQuery.isLoading && !analyticsQuery.isError && analyticsQuery.data && (
+              <>
+                <div className="grid gap-3 md:grid-cols-4">
+                  <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 p-3">
+                    <p className="text-xs uppercase tracking-wide text-cyan-200/90">Received</p>
+                    <p className="mt-1 font-mono text-lg font-semibold text-cyan-200">
+                      Rs {analyticsQuery.data.summary.total_received.toLocaleString("en-IN")}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3">
+                    <p className="text-xs uppercase tracking-wide text-rose-200/90">Paid</p>
+                    <p className="mt-1 font-mono text-lg font-semibold text-rose-200">
+                      Rs {analyticsQuery.data.summary.total_paid.toLocaleString("en-IN")}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-indigo-500/30 bg-indigo-500/10 p-3">
+                    <p className="text-xs uppercase tracking-wide text-indigo-200/90">Net Balance</p>
+                    <p
+                      className={cn(
+                        "mt-1 font-mono text-lg font-semibold",
+                        analyticsQuery.data.summary.net_balance >= 0 ? "text-emerald-300" : "text-rose-300"
+                      )}
+                    >
+                      Rs {analyticsQuery.data.summary.net_balance.toLocaleString("en-IN")}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
+                    <p className="text-xs uppercase tracking-wide text-amber-200/90">Transactions</p>
+                    <p className="mt-1 font-mono text-lg font-semibold text-amber-200">
+                      {analyticsQuery.data.summary.transaction_count.toLocaleString("en-IN")}
+                    </p>
+                    <p className={cn("mt-1 text-xs", getTrendTone(analyticsQuery.data.summary.trend_direction))}>
+                      Trend: {analyticsQuery.data.summary.trend_direction}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="h-80 w-full rounded-lg border border-border/50 bg-secondary/15 p-2">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={analyticsChartData} margin={{ top: 12, right: 16, left: 0, bottom: 6 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(148, 163, 184, 0.2)" />
+                      <XAxis
+                        dataKey="bucketLabel"
+                        tick={{ fill: "#94a3b8", fontSize: 12 }}
+                        axisLine={{ stroke: "rgba(148, 163, 184, 0.4)" }}
+                        tickLine={{ stroke: "rgba(148, 163, 184, 0.4)" }}
+                      />
+                      <YAxis
+                        yAxisId="amount"
+                        tick={{ fill: "#94a3b8", fontSize: 12 }}
+                        axisLine={{ stroke: "rgba(148, 163, 184, 0.4)" }}
+                        tickLine={{ stroke: "rgba(148, 163, 184, 0.4)" }}
+                        tickFormatter={(value) => `Rs ${Number(value).toLocaleString("en-IN")}`}
+                      />
+                      <YAxis
+                        yAxisId="count"
+                        orientation="right"
+                        allowDecimals={false}
+                        tick={{ fill: "#94a3b8", fontSize: 12 }}
+                        axisLine={{ stroke: "rgba(148, 163, 184, 0.4)" }}
+                        tickLine={{ stroke: "rgba(148, 163, 184, 0.4)" }}
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: "#0f172a",
+                          border: "1px solid rgba(148,163,184,0.35)",
+                          borderRadius: "10px",
+                        }}
+                        formatter={(value, name) => {
+                          if (name === "Transactions") {
+                            return [Number(value).toLocaleString("en-IN"), name]
+                          }
+                          return [`Rs ${Number(value).toLocaleString("en-IN")}`, name]
+                        }}
+                      />
+                      <Legend />
+                      <Bar yAxisId="amount" dataKey="paid" name="Paid" fill="#f43f5e" radius={[4, 4, 0, 0]} />
+                      <Line
+                        yAxisId="amount"
+                        type="monotone"
+                        dataKey="received"
+                        name="Received"
+                        stroke="#06b6d4"
+                        strokeWidth={2}
+                        dot={false}
+                      />
+                      <Line
+                        yAxisId="amount"
+                        type="monotone"
+                        dataKey="net"
+                        name="Net"
+                        stroke="#f59e0b"
+                        strokeWidth={2}
+                        dot={false}
+                      />
+                      <Line
+                        yAxisId="count"
+                        type="monotone"
+                        dataKey="transactions"
+                        name="Transactions"
+                        stroke="#a78bfa"
+                        strokeWidth={1.5}
+                        strokeDasharray="4 4"
+                        dot={false}
+                      />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+
+                <div className="grid gap-2">
+                  {analyticsQuery.data.insights.map((insight, index) => (
+                    <div
+                      key={`${insight.title}-${index}`}
+                      className={cn("rounded-lg border px-3 py-2 text-sm", getInsightStyle(insight.type))}
+                    >
+                      <p className="font-semibold">{insight.title}</p>
+                      <p className="text-xs opacity-90">{insight.detail}</p>
+                    </div>
+                  ))}
+                  {analyticsQuery.data.insights.length === 0 && (
+                    <div className="rounded-lg border border-border/50 bg-secondary/20 px-3 py-2 text-sm text-muted-foreground">
+                      Not enough data in this period yet for insights.
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-lg border border-border/50 bg-secondary/15 p-3">
+                  <p className="mb-2 text-sm font-semibold text-card-foreground">Logs In Selected Period</p>
+                  <div className="max-h-64 space-y-1.5 overflow-y-auto pr-1">
+                    {analyticsLogs.slice(0, 30).map((entry) => (
+                      <div
+                        key={entry.id}
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/40 bg-secondary/30 px-2 py-1.5 text-xs"
+                      >
+                        <span className="text-muted-foreground">
+                          {formatDateTime(entry.log_date)}
+                          {entry.vendor_name ? ` • ${entry.vendor_name}` : ""}
+                          {entry.bill_id ? ` • Bill #${shortBillId(entry.bill_id)}` : ""}
+                          {entry.payment_mode ? ` • ${String(entry.payment_mode).toUpperCase()}` : ""}
+                          {entry.note ? ` • ${entry.note}` : ""}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <Badge
+                            className={cn(
+                              "border",
+                              entry.log_type === "received"
+                                ? "border-cyan-500/40 bg-cyan-500/10 text-cyan-300"
+                                : "border-rose-500/40 bg-rose-500/10 text-rose-300"
+                            )}
+                          >
+                            {entry.log_type}
+                          </Badge>
+                          <span
+                            className={cn(
+                              "font-mono",
+                              entry.log_type === "received" ? "text-cyan-300" : "text-rose-300"
+                            )}
+                          >
+                            Rs {Number(entry.amount).toLocaleString("en-IN")}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+
+                    {analyticsLogs.length === 0 && (
+                      <p className="text-xs text-muted-foreground">No logs found for this selection.</p>
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="border-border/50 bg-card">
+          <CardHeader>
             <CardTitle className="text-lg text-card-foreground">Recent Daily Logs</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
+            <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
             {logsPreview.map((log) => (
               <div
                 key={log.id}
@@ -732,7 +1095,7 @@ export default function DailyLogsPage() {
                   <div>
                     <p className="text-sm font-medium text-card-foreground">
                       {log.vendorName}
-                      {log.billId ? ` • Bill #${log.billId}` : ""}
+                      {log.billId ? ` • Bill #${shortBillId(log.billId)}` : ""}
                     </p>
                     <p className="text-xs text-muted-foreground">
                       {formatDate(log.date)}{log.note ? ` • ${log.note}` : ""}
@@ -768,14 +1131,14 @@ export default function DailyLogsPage() {
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-rose-200">
                   Today Detailed Payments
                 </p>
-                <div className="space-y-1.5">
+                <div className="max-h-44 space-y-1.5 overflow-y-auto pr-1">
                   {todayPaidSummary.payments.map((payment) => (
                     <div
                       key={payment.id}
                       className="flex items-center justify-between rounded-md border border-rose-500/20 bg-rose-500/5 px-2 py-1.5 text-xs"
                     >
                       <span className="text-rose-100">
-                        Bill #{payment.bill_id} • {formatDateTime(payment.payment_date)}
+                        {payment.vendorName} • {payment.method} • Bill #{shortBillId(payment.billId)} • {formatDateTime(payment.paymentDate)}
                       </span>
                       <span className="font-mono text-rose-200">
                         ₹{asNumber(payment.amount).toLocaleString("en-IN")}
@@ -791,6 +1154,7 @@ export default function DailyLogsPage() {
                 No daily logs yet. Add your first entry above.
               </div>
             )}
+            </div>
           </CardContent>
         </Card>
       </div>
