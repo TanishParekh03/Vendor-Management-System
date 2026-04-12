@@ -32,7 +32,7 @@ import {
 } from "@/lib/api"
 import { getReceivedLogs, type ReceivedDailyLog } from "@/lib/daily-logs"
 
-const PAYMENT_HISTORY_QUERY_KEY = "payment-logs"
+const PAYMENT_HISTORY_QUERY_KEY = "payments-history"
 
 type UnifiedPaymentEntry = {
   id: string
@@ -72,12 +72,18 @@ export function PaymentHistory() {
   const vendorsQuery = useQuery({
     queryKey: ["vendors", userId],
     queryFn: () => getVendors(userId),
+    staleTime: 2 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
   })
 
   const vendorBillsQuery = useQuery({
     queryKey: ["vendor-bills", userId, selectedVendor],
     queryFn: () => getVendorBills(userId, selectedVendor),
     enabled: selectedVendor !== "all",
+    staleTime: 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
   })
 
   useEffect(() => {
@@ -138,6 +144,9 @@ export function PaymentHistory() {
         (a, b) => new Date(b.payment_date ?? "").getTime() - new Date(a.payment_date ?? "").getTime()
       )
     },
+    staleTime: 45 * 1000,
+    gcTime: 8 * 60 * 1000,
+    refetchOnWindowFocus: false,
   })
 
   const vendorNameById = useMemo(() => {
@@ -251,9 +260,8 @@ export function PaymentHistory() {
                       : (vendorNameById.get(log.vendor_id) ?? `Vendor #${log.vendor_id}`)}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
-                    {log.entry_type === "received" ? "-" : `#${log.bill_id}`}
+                    {log.entry_type === "received" ? "-" : `#${shortBillId(log.bill_id)}`}
                   </TableCell>
-                  <TableCell className="text-muted-foreground">#{shortBillId(log.bill_id)}</TableCell>
                   <TableCell className="text-right font-mono font-semibold text-emerald-400">
                     ₹{asNumber(log.amount).toLocaleString("en-IN")}
                   </TableCell>

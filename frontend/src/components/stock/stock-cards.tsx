@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useMemo, useState } from "react"
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ShoppingCart, Users } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -59,64 +60,69 @@ function getStockStatus(percentage: number) {
 }
 
 export function StockCards() {
+  const queryClient = useQueryClient()
   const userId = getCurrentUserId()
-  const [commodities, setCommodities] = useState<UiCommodity[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
   const [vendorPriorityByCommodity, setVendorPriorityByCommodity] = useState<
     Record<string, VendorPriorityState>
   >({})
 
-  useEffect(() => {
-    let ignore = false
+  const commoditiesQuery = useQuery({
+    queryKey: ["stock-commodities", userId],
+    queryFn: () => getCommodities(userId),
+    staleTime: 2 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  })
 
-    async function loadCommodities() {
-      setLoading(true)
-      setError(null)
+  const commodityVendorQueries = useQueries({
+    queries: (commoditiesQuery.data ?? []).map((item) => ({
+      queryKey: ["commodity-vendors", userId, item.id],
+      queryFn: () => getCommodityVendors(userId, item.id),
+      staleTime: 5 * 60 * 1000,
+      gcTime: 15 * 60 * 1000,
+      refetchOnWindowFocus: false,
+      enabled: commoditiesQuery.isSuccess,
+    })),
+  })
 
-      try {
-        const items = await getCommodities(userId)
-        const totalQuantities = updateTotalsFromCommodities(userId, items)
-        const hydrated = await Promise.all(
-          items.map(async (item) => {
-            const linkedVendors = await getCommodityVendors(userId, item.id)
-            const totalStock = Math.max(Number(totalQuantities[item.id] ?? item.quantity), 1)
-            return {
-              id: item.id,
-              name: item.name,
-              icon: getCommodityIcon(item.name),
-              currentStock: item.quantity,
-              totalStock,
-              unit: item.unit,
-              linkedVendorNames: linkedVendors.map((vendor) => vendor.name),
-            }
-          })
-        )
+  const commodities = useMemo<UiCommodity[]>(() => {
+    const items = commoditiesQuery.data ?? []
+    const totalQuantities = updateTotalsFromCommodities(userId, items)
 
-        if (!ignore) {
-          setCommodities(hydrated)
-        }
-      } catch (loadError) {
-        if (ignore) return
+    return items.map((item, index) => {
+      const linkedVendors = commodityVendorQueries[index]?.data ?? []
+      const totalStock = Math.max(Number(totalQuantities[item.id] ?? item.quantity), 1)
 
-        const message =
-          loadError instanceof ApiRequestError
-            ? loadError.message
-            : "Failed to load commodities"
-        setError(message)
-      } finally {
-        if (!ignore) {
-          setLoading(false)
-        }
+      return {
+        id: item.id,
+        name: item.name,
+        icon: getCommodityIcon(item.name),
+        currentStock: item.quantity,
+        totalStock,
+        unit: item.unit,
+        linkedVendorNames: linkedVendors.map((vendor) => vendor.name),
       }
+    })
+  }, [commoditiesQuery.data, commodityVendorQueries, userId])
+
+  const loading = commoditiesQuery.isLoading || commodityVendorQueries.some((query) => query.isLoading)
+
+  const error = useMemo(() => {
+    if (commoditiesQuery.error) {
+      return commoditiesQuery.error instanceof ApiRequestError
+        ? commoditiesQuery.error.message
+        : "Failed to load commodities"
     }
 
-    void loadCommodities()
-
-    return () => {
-      ignore = true
+    const vendorError = commodityVendorQueries.find((query) => query.error)?.error
+    if (vendorError) {
+      return vendorError instanceof ApiRequestError
+        ? vendorError.message
+        : "Failed to load linked vendors"
     }
-  }, [userId])
+
+    return null
+  }, [commoditiesQuery.error, commodityVendorQueries])
 
   if (loading) {
     return (
@@ -154,7 +160,11 @@ export function StockCards() {
     }))
 
     try {
-      const data = await getSmartVendorRecommendation(userId, commodityId)
+      const data = await queryClient.fetchQuery({
+        queryKey: ["smart-vendor-recommendation", userId, commodityId],
+        queryFn: () => getSmartVendorRecommendation(userId, commodityId),
+        staleTime: 60 * 1000,
+      })
       setVendorPriorityByCommodity((prev) => ({
         ...prev,
         [commodityId]: {

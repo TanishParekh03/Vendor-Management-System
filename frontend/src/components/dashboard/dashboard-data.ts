@@ -1,17 +1,20 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useMemo } from "react"
+import { useQuery } from "@tanstack/react-query"
 import {
   ApiRequestError,
   getCommodities,
-  getCommodityVendors,
   getCurrentUserId,
+  getLowStockCommodities,
+  getPaymentPriorityList,
+  getSmartVendorRecommendation,
   getVendorBills,
-  getVendorPaymentLogs,
+  getVendorPayments,
   getVendors,
   type BackendBill,
   type BackendCommodity,
-  type BackendPaymentLog,
+  type BackendPayment,
   type BackendVendor,
 } from "@/lib/api"
 
@@ -99,12 +102,6 @@ function normalizeDate(value?: string): string {
   return parsed.toISOString()
 }
 
-function getToleranceLevel(daysSinceLastPayment: number): "LOW" | "MEDIUM" | "HIGH" {
-  if (daysSinceLastPayment >= 14) return "LOW"
-  if (daysSinceLastPayment >= 7) return "MEDIUM"
-  return "HIGH"
-}
-
 function formatShortDate(date: Date): string {
   return date.toLocaleDateString("en-IN", { day: "numeric", month: "short" })
 }
@@ -155,186 +152,177 @@ function buildDebtDistribution(vendors: BackendVendor[], balances: Map<string, n
     .sort((a, b) => b.balance - a.balance)
 }
 
-export function useDashboardData() {
-  const [data, setData] = useState<DashboardData>(DEFAULT_DASHBOARD_DATA)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+async function fetchDashboardData(userId: string): Promise<DashboardData> {
+  const [vendors, commodities, lowStockItems, paymentPriorities] = await Promise.all([
+    getVendors(userId),
+    getCommodities(userId),
+    getLowStockCommodities(userId),
+    getPaymentPriorityList(userId),
+  ])
 
-  useEffect(() => {
-    let ignore = false
+  const billsByVendor = new Map<string, BackendBill[]>()
+  const paymentsByVendor = new Map<string, BackendPayment[]>()
 
-    async function load() {
-      setLoading(true)
-      setError(null)
+  await Promise.all(
+    vendors.map(async (vendor) => {
+      const [bills, payments] = await Promise.all([
+        getVendorBills(userId, vendor.id),
+        getVendorPayments(userId, vendor.id),
+      ])
+      billsByVendor.set(vendor.id, bills)
+      paymentsByVendor.set(vendor.id, payments)
+    })
+  )
 
-      try {
-        const userId = getCurrentUserId()
+  const vendorOutstanding = new Map<string, number>()
+  const allTransactions: DashboardTransaction[] = []
 
-        const [vendors, commodities] = await Promise.all([
-          getVendors(userId),
-          getCommodities(userId),
-        ])
+  for (const vendor of vendors) {
+    const bills = billsByVendor.get(vendor.id) ?? []
+    const payments = paymentsByVendor.get(vendor.id) ?? []
 
-        const billsByVendor = new Map<string, BackendBill[]>()
-        const paymentsByVendor = new Map<string, BackendPaymentLog[]>()
+    let outstanding = 0
 
-        await Promise.all(
-          vendors.map(async (vendor) => {
-            const [bills, payments] = await Promise.all([
-              getVendorBills(userId, vendor.id),
-              getVendorPaymentLogs(userId, vendor.id),
-            ])
-            billsByVendor.set(vendor.id, bills)
-            paymentsByVendor.set(vendor.id, payments)
-          })
-        )
+    for (const bill of bills) {
+      const total = toNumber(bill.total_amount)
+      const paid = toNumber(bill.paid_amount)
+      const due = Math.max(total - paid, 0)
+      outstanding += due
 
-        const vendorOutstanding = new Map<string, number>()
-        const latestPaymentDateByVendor = new Map<string, Date | null>()
-        const allTransactions: DashboardTransaction[] = []
-
-        for (const vendor of vendors) {
-          const bills = billsByVendor.get(vendor.id) ?? []
-          const payments = paymentsByVendor.get(vendor.id) ?? []
-
-          let outstanding = 0
-
-          for (const bill of bills) {
-            const total = toNumber(bill.total_amount)
-            const paid = toNumber(bill.paid_amount)
-            const due = Math.max(total - paid, 0)
-            outstanding += due
-
-            allTransactions.push({
-              id: `bill-${bill.id}`,
-              type: "supply",
-              vendorName: vendor.name,
-              amount: total,
-              date: normalizeDate(bill.date),
-              commodity: "Supply Bill",
-            })
-          }
-
-          let latestPaymentDate: Date | null = null
-
-          for (const payment of payments) {
-            const paymentDate = new Date(normalizeDate(payment.payment_date))
-            if (!latestPaymentDate || paymentDate > latestPaymentDate) {
-              latestPaymentDate = paymentDate
-            }
-
-            allTransactions.push({
-              id: `payment-${payment.id}`,
-              type: "payment",
-              vendorName: vendor.name,
-              amount: toNumber(payment.amount_paid),
-              date: paymentDate.toISOString(),
-              mode: payment.payment_mode,
-            })
-          }
-
-          vendorOutstanding.set(vendor.id, outstanding)
-          latestPaymentDateByVendor.set(vendor.id, latestPaymentDate)
-        }
-
-        const sortedTransactions = allTransactions
-          .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-          .slice(0, 10)
-
-        const cashFlowData = buildLast30DaysFlow(allTransactions)
-        const totalInflow = cashFlowData.reduce((sum, item) => sum + item.inflow, 0)
-        const totalOutflow = cashFlowData.reduce((sum, item) => sum + item.outflow, 0)
-
-        const totalOutstandingDebt = Array.from(vendorOutstanding.values()).reduce(
-          (sum, value) => sum + value,
-          0
-        )
-
-        const debtDistribution = buildDebtDistribution(vendors, vendorOutstanding)
-
-        const lowStockCommodity = [...commodities]
-          .sort((a, b) => a.quantity - b.quantity)
-          .find((commodity) => commodity.quantity <= 10)
-
-        let smartBuyRecommendation: SmartBuyRecommendation = null
-
-        if (lowStockCommodity) {
-          const commodityVendors = await getCommodityVendors(userId, lowStockCommodity.id)
-          const bestVendor = [...commodityVendors].sort(
-            (a, b) => (vendorOutstanding.get(a.id) ?? 0) - (vendorOutstanding.get(b.id) ?? 0)
-          )[0]
-
-          smartBuyRecommendation = {
-            commodity: lowStockCommodity.name,
-            stockLevel: lowStockCommodity.quantity,
-            unit: lowStockCommodity.unit,
-            vendorName: bestVendor?.name ?? "No linked vendor",
-            reason: bestVendor
-              ? "Lowest outstanding balance among linked vendors"
-              : "Link this commodity to a vendor for better recommendations",
-          }
-        }
-
-        const topDebtVendor = [...vendors].sort(
-          (a, b) => (vendorOutstanding.get(b.id) ?? 0) - (vendorOutstanding.get(a.id) ?? 0)
-        )[0]
-
-        let smartPayRecommendation: SmartPayRecommendation = null
-
-        if (topDebtVendor) {
-          const latestPaymentDate = latestPaymentDateByVendor.get(topDebtVendor.id)
-          const daysSinceLastPayment = latestPaymentDate
-            ? Math.max(
-                0,
-                Math.floor((Date.now() - latestPaymentDate.getTime()) / (1000 * 60 * 60 * 24))
-              )
-            : 30
-
-          smartPayRecommendation = {
-            vendorName: topDebtVendor.name,
-            outstandingAmount: vendorOutstanding.get(topDebtVendor.id) ?? 0,
-            toleranceLevel: getToleranceLevel(daysSinceLastPayment),
-            daysSinceLastPayment,
-          }
-        }
-
-        if (!ignore) {
-          setData({
-            metrics: {
-              totalOutstandingDebt,
-              cashInHand: Math.max(totalInflow - totalOutflow, 0),
-              activeVendors: vendors.length,
-              lowStockAlerts: commodities.filter((commodity) => commodity.quantity <= 10).length,
-            },
-            transactions: sortedTransactions,
-            cashFlowData,
-            debtDistribution,
-            smartBuyRecommendation,
-            smartPayRecommendation,
-          })
-        }
-      } catch (loadError) {
-        if (ignore) return
-        const message =
-          loadError instanceof ApiRequestError
-            ? loadError.message
-            : loadError instanceof Error
-              ? loadError.message
-              : "Failed to load dashboard"
-        setError(message)
-      } finally {
-        if (!ignore) {
-          setLoading(false)
-        }
-      }
+      allTransactions.push({
+        id: `bill-${bill.id}`,
+        type: "supply",
+        vendorName: vendor.name,
+        amount: total,
+        date: normalizeDate(bill.date),
+        commodity: "Supply Bill",
+      })
     }
 
-    void load()
+    for (const payment of payments) {
+      const paymentDate = new Date(normalizeDate(payment.payment_date))
+      allTransactions.push({
+        id: `payment-${payment.id}`,
+        type: "payment",
+        vendorName: vendor.name,
+        amount: toNumber(payment.amount),
+        date: paymentDate.toISOString(),
+        mode: payment.payment_mode,
+      })
+    }
 
-    return () => {
-      ignore = true
+    vendorOutstanding.set(vendor.id, outstanding)
+  }
+
+  const sortedTransactions = allTransactions
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    .slice(0, 10)
+
+  const cashFlowData = buildLast30DaysFlow(allTransactions)
+  const totalInflow = cashFlowData.reduce((sum, item) => sum + item.inflow, 0)
+  const totalOutflow = cashFlowData.reduce((sum, item) => sum + item.outflow, 0)
+
+  const totalOutstandingDebt = Array.from(vendorOutstanding.values()).reduce(
+    (sum, value) => sum + value,
+    0
+  )
+
+  const debtDistribution = buildDebtDistribution(vendors, vendorOutstanding)
+
+  const lowStockCommodity = lowStockItems[0] ?? null
+
+  let smartBuyRecommendation: SmartBuyRecommendation = null
+
+  if (lowStockCommodity) {
+    const smartVendorData = await getSmartVendorRecommendation(userId, lowStockCommodity.commodity_id)
+    const recommendedVendor = smartVendorData.recommended_vendor
+    const shortage = toNumber(lowStockCommodity.shortage)
+    const currentQuantity = toNumber(lowStockCommodity.current_quantity)
+
+    smartBuyRecommendation = {
+      commodity: lowStockCommodity.commodity_name,
+      stockLevel: currentQuantity,
+      unit: "units",
+      vendorName: recommendedVendor?.vendor_name ?? "No linked vendor",
+      reason:
+        recommendedVendor?.recommendation_reason ??
+        `Short by ${shortage.toLocaleString("en-IN")} units. Link commodity to vendors for smarter recommendations.`,
+    }
+  }
+
+  let smartPayRecommendation: SmartPayRecommendation = null
+
+  const topPriorityVendor = paymentPriorities[0]
+  if (topPriorityVendor) {
+    const normalizedTolerance = String(topPriorityVendor.tolerance_level ?? "medium").toUpperCase()
+    const toleranceLevel: "LOW" | "MEDIUM" | "HIGH" =
+      normalizedTolerance === "LOW" || normalizedTolerance === "MEDIUM" || normalizedTolerance === "HIGH"
+        ? normalizedTolerance
+        : "MEDIUM"
+
+    smartPayRecommendation = {
+      vendorName: topPriorityVendor.vendor_name,
+      outstandingAmount: toNumber(topPriorityVendor.pending_amount),
+      toleranceLevel,
+      daysSinceLastPayment: Math.max(toNumber(topPriorityVendor.days_waiting), 0),
+    }
+  }
+
+  return {
+    metrics: {
+      totalOutstandingDebt,
+      cashInHand: Math.max(totalInflow - totalOutflow, 0),
+      activeVendors: vendors.length,
+      lowStockAlerts: lowStockItems.length,
+    },
+    transactions: sortedTransactions,
+    cashFlowData,
+    debtDistribution,
+    smartBuyRecommendation,
+    smartPayRecommendation,
+  }
+}
+
+export function useDashboardData() {
+  const userId = useMemo(() => {
+    try {
+      return getCurrentUserId()
+    } catch {
+      return null
     }
   }, [])
+
+  const dashboardQuery = useQuery({
+    queryKey: ["dashboard-data", userId],
+    enabled: Boolean(userId),
+    queryFn: () => fetchDashboardData(String(userId)),
+    staleTime: 2 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    retry: 1,
+  })
+
+  const data = dashboardQuery.data ?? DEFAULT_DASHBOARD_DATA
+
+  const error = useMemo(() => {
+    if (!userId) {
+      return "Missing authenticated user. Login first."
+    }
+    if (!dashboardQuery.error) {
+      return null
+    }
+
+    if (dashboardQuery.error instanceof ApiRequestError) {
+      return dashboardQuery.error.message
+    }
+    if (dashboardQuery.error instanceof Error) {
+      return dashboardQuery.error.message
+    }
+
+    return "Failed to load dashboard"
+  }, [dashboardQuery.error, userId])
+
+  const loading = dashboardQuery.isLoading
 
   const hasData = useMemo(() => {
     return (

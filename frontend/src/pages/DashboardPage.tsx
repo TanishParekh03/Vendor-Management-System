@@ -1,7 +1,7 @@
 import { DashboardLayout } from "@/components/dashboard/dashboard-layout"
 import { KPICards } from "@/components/dashboard/kpi-cards"
 import { DebtDistributionChart } from "@/components/dashboard/debt-distribution-chart"
-import { RecentTransactions } from "@/components/dashboard/recent-transactions"
+import { FinancialAnalysis } from "@/components/dashboard/financial-analysis"
 import { SmartRecommendations } from "@/components/dashboard/smart-recommendations"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { useDashboardData } from "@/components/dashboard/dashboard-data"
@@ -19,6 +19,10 @@ export default function DashboardPage() {
           </div>
         </div>
 
+        <KPICards metrics={data.metrics} loading={loading} />
+
+        <FinancialAnalysis />
+
         <div>
           <h2 className="mb-4 text-lg font-semibold text-foreground">
             AI-Powered Recommendations
@@ -30,8 +34,6 @@ export default function DashboardPage() {
           />
         </div>
 
-        <KPICards metrics={data.metrics} loading={loading} />
-
         {error && (
           <Alert>
             <AlertTitle>Dashboard data issue</AlertTitle>
@@ -39,17 +41,8 @@ export default function DashboardPage() {
           </Alert>
         )}
 
-        <div className="grid gap-6 lg:grid-cols-5">
-          <div className="lg:col-span-3">
-            <DebtDistributionChart data={data.debtDistribution} loading={loading} />
-          </div>
-          <div className="lg:col-span-2">
-            <RecentTransactions
-              transactions={data.transactions}
-              cashFlowData={data.cashFlowData}
-              loading={loading}
-            />
-          </div>
+        <div className="grid gap-6">
+          <DebtDistributionChart data={data.debtDistribution} loading={loading} />
         </div>
 
         {!loading && !hasData && !error && (

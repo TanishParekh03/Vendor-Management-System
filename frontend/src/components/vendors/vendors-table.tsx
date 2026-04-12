@@ -36,13 +36,13 @@ import {
   ApiRequestError,
   type BackendBill,
   type BackendCommodity,
-  type BackendPaymentLog,
+  type BackendPayment,
   deleteVendor,
   getCommodities,
   getCurrentUserId,
   getVendorBills,
   getVendorCommodities,
-  getVendorPaymentLogs,
+  getVendorPayments,
   getVendors,
   linkCommodityToVendor,
   updateVendor,
@@ -63,7 +63,7 @@ type UiVendor = {
   lastSupplyDate: string | null
   lastPaymentDate: string | null
   bills: BackendBill[]
-  payments: BackendPaymentLog[]
+  payments: BackendPayment[]
 }
 
 const VENDORS_QUERY_KEY = "vendors-hydrated"
@@ -118,8 +118,17 @@ async function fetchHydratedVendors(userId: string): Promise<UiVendor[]> {
       const [linkedCommodities, bills, payments] = await Promise.all([
         getVendorCommodities(userId, vendor.id),
         getVendorBills(userId, vendor.id),
-        getVendorPaymentLogs(userId, vendor.id),
+        getVendorPayments(userId, vendor.id),
       ])
+
+      const normalizedPayments: BackendPayment[] = payments
+        .map((payment) => ({
+          ...payment,
+          payment_mode: payment.payment_mode,
+        }))
+        .sort(
+        (left, right) => new Date(right.payment_date ?? "").getTime() - new Date(left.payment_date ?? "").getTime()
+      )
 
       const outstandingBalance = bills.reduce((sum, bill) => {
         const pending = asNumber(bill.total_amount) - asNumber(bill.paid_amount)
@@ -135,9 +144,9 @@ async function fetchHydratedVendors(userId: string): Promise<UiVendor[]> {
         toleranceLevel: toUiToleranceLevel(vendor.tolerance_level) ?? getToleranceLevel(outstandingBalance),
         flexibility: getFlexibility(outstandingBalance),
         lastSupplyDate: bills[0]?.date ?? null,
-        lastPaymentDate: payments[0]?.payment_date ?? null,
+        lastPaymentDate: normalizedPayments[0]?.payment_date ?? null,
         bills,
-        payments,
+        payments: normalizedPayments,
       }
     })
   )
@@ -166,6 +175,9 @@ export function VendorsTable() {
   const vendorsQuery = useQuery({
     queryKey: [VENDORS_QUERY_KEY, userId],
     queryFn: () => fetchHydratedVendors(userId),
+    staleTime: 2 * 60 * 1000,
+    gcTime: 12 * 60 * 1000,
+    refetchOnWindowFocus: false,
   })
 
   const vendors = vendorsQuery.data ?? []
@@ -174,6 +186,9 @@ export function VendorsTable() {
     queryKey: ["commodities", userId],
     queryFn: () => getCommodities(userId),
     enabled: addDialogOpen,
+    staleTime: 2 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
   })
 
   const selectedVendor = useMemo(() => {

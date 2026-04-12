@@ -1,3 +1,9 @@
+import {
+  addDailyLog,
+  getDailyLogs,
+  type BackendDailyLog,
+} from "@/lib/api"
+
 export type ReceivedDailyLog = {
   id: string
   userId: string
@@ -6,77 +12,39 @@ export type ReceivedDailyLog = {
   note?: string
 }
 
-const DAILY_RECEIVED_LOGS_KEY = "daily_received_logs"
-
-function isBrowser(): boolean {
-  return typeof window !== "undefined"
-}
-
-function readAllLogs(): ReceivedDailyLog[] {
-  if (!isBrowser()) {
-    return []
-  }
-
-  const raw = window.localStorage.getItem(DAILY_RECEIVED_LOGS_KEY)
-  if (!raw) {
-    return []
-  }
-
-  try {
-    const parsed = JSON.parse(raw) as unknown
-    if (!Array.isArray(parsed)) {
-      return []
-    }
-
-    return parsed.filter((item): item is ReceivedDailyLog => {
-      if (typeof item !== "object" || item === null) {
-        return false
-      }
-
-      const candidate = item as Partial<ReceivedDailyLog>
-      return (
-        typeof candidate.id === "string" &&
-        typeof candidate.userId === "string" &&
-        typeof candidate.amount === "number" &&
-        Number.isFinite(candidate.amount) &&
-        typeof candidate.date === "string"
-      )
-    })
-  } catch {
-    return []
+function toReceivedDailyLog(entry: BackendDailyLog): ReceivedDailyLog {
+  return {
+    id: entry.id,
+    userId: entry.user_id,
+    amount: typeof entry.amount === "number" ? entry.amount : Number(entry.amount),
+    date: entry.log_date,
+    note: typeof entry.note === "string" && entry.note.trim().length > 0 ? entry.note : undefined,
   }
 }
 
-function writeAllLogs(logs: ReceivedDailyLog[]): void {
-  if (!isBrowser()) {
-    return
-  }
+export async function getReceivedLogs(userId: string): Promise<ReceivedDailyLog[]> {
+  const rows = await getDailyLogs(userId, {
+    logType: "received",
+    limit: 500,
+  })
 
-  window.localStorage.setItem(DAILY_RECEIVED_LOGS_KEY, JSON.stringify(logs))
-}
-
-export function getReceivedLogs(userId: string): ReceivedDailyLog[] {
-  return readAllLogs()
-    .filter((log) => log.userId === userId)
+  return rows
+    .map(toReceivedDailyLog)
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
 }
 
-export function addReceivedLog(input: {
+export async function addReceivedLog(input: {
   userId: string
   amount: number
   date: string
   note?: string
-}): ReceivedDailyLog {
-  const nextLog: ReceivedDailyLog = {
-    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    userId: input.userId,
+}): Promise<ReceivedDailyLog> {
+  const created = await addDailyLog(input.userId, {
+    logType: "received",
     amount: input.amount,
-    date: input.date,
-    note: input.note?.trim() ? input.note.trim() : undefined,
-  }
+    logDate: input.date,
+    note: input.note,
+  })
 
-  const logs = readAllLogs()
-  writeAllLogs([nextLog, ...logs])
-
-  return nextLog
+  return toReceivedDailyLog(created)
 }

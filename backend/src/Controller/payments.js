@@ -4,6 +4,7 @@ const {
     getPaymentsForUserQuery,
     getPaymentsForVendorQuery,
     getPaymentsForBillQuery,
+    getPaymentSuggestionQuery,
     getBillForUpdateQuery,
     updateBillAfterPaymentQuery
 } = require('../services/paymentQueries')
@@ -13,10 +14,17 @@ const createPayment = async (req, res, next) => {
     const client = await pool.connect()
     try {
         const userId = req.params.userId
-        const { vendorId, billId, amount } = req.body
+        const { vendorId, billId, amount, paymentMode } = req.body
 
-        if (!vendorId || !billId || amount == null) {
-            const error = new Error('vendorId, billId and amount are required')
+        if (!vendorId || !billId || amount == null || !paymentMode) {
+            const error = new Error('vendorId, billId, amount and paymentMode are required')
+            error.status = 400
+            return next(error)
+        }
+
+        const normalizedPaymentMode = String(paymentMode).toLowerCase()
+        if (normalizedPaymentMode !== 'cash' && normalizedPaymentMode !== 'upi') {
+            const error = new Error('paymentMode must be one of: cash, upi')
             error.status = 400
             return next(error)
         }
@@ -36,6 +44,16 @@ const createPayment = async (req, res, next) => {
         }
 
         const bill = billResult.rows[0]
+        const currentPaidAmount = Number(bill.paid_amount)
+        const totalBillAmount = Number(bill.total_amount)
+        const pendingAmount = Math.max(totalBillAmount - currentPaidAmount, 0)
+
+        if (numericAmount > pendingAmount) {
+            const error = new Error(`Amount exceeds pending bill amount. Pending amount is ${pendingAmount}.`)
+            error.status = 400
+            throw error
+        }
+
         const nextPaidAmount = Number(bill.paid_amount) + numericAmount
         const nextStatus = await resolveBillStatusByAmounts(nextPaidAmount, Number(bill.total_amount))
 
@@ -43,7 +61,8 @@ const createPayment = async (req, res, next) => {
             userId,
             vendorId,
             billId,
-            numericAmount
+            numericAmount,
+            normalizedPaymentMode
         ])
 
         const updatedBillResult = await client.query(updateBillAfterPaymentQuery, [
@@ -61,7 +80,7 @@ const createPayment = async (req, res, next) => {
             bill: updatedBillResult.rows[0]
         })
     } catch (err) {
-        await client.query('ROLLBACK').catch(() => {})
+        await client.query('ROLLBACK').catch(() => { })
         if (err.code === '23503') {
             const error = new Error('Invalid userId, vendorId or billId')
             error.status = 400
@@ -103,9 +122,31 @@ const getPaymentsForBill = async (req, res, next) => {
     }
 }
 
+const getPaymentSuggestion = async (req, res, next) => {
+    try {
+        const userId = req.params.userId
+        const result = await pool.query(getPaymentSuggestionQuery, [userId])
+
+        if (result.rows.length === 0) {
+            return res.status(200).json({
+                msg: "No pending payments",
+                vendors: []
+            })
+        }
+
+        return res.status(200).json({
+            suggested_vendor: result.rows[0],
+            all_pending_vendors: result.rows
+        })
+    } catch (err) {
+        return next(err)
+    }
+}
+
 module.exports = {
     createPayment,
     getPaymentsForUser,
     getPaymentsForVendor,
-    getPaymentsForBill
+    getPaymentsForBill,
+    getPaymentSuggestion
 }

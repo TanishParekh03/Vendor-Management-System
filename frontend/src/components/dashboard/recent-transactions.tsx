@@ -1,8 +1,13 @@
 "use client"
 
+import { useMemo } from "react"
 import {
+  Area,
+  CartesianGrid,
+  Legend,
   Line,
   LineChart,
+  ReferenceLine,
   XAxis,
   YAxis,
   ResponsiveContainer,
@@ -14,7 +19,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import type { CashFlowPoint, DashboardTransaction } from "./dashboard-data"
 
-const MAX_TRANSACTIONS = 8
+const MAX_TRANSACTIONS = 20
 
 type RecentTransactionsProps = {
   transactions: DashboardTransaction[]
@@ -24,6 +29,21 @@ type RecentTransactionsProps = {
 
 export function RecentTransactions({ transactions, cashFlowData, loading = false }: RecentTransactionsProps) {
   const boundedTransactions = transactions.slice(0, MAX_TRANSACTIONS)
+  const chartData = useMemo(
+    () => cashFlowData.map((point) => ({ ...point, net: point.inflow - point.outflow })),
+    [cashFlowData]
+  )
+
+  const totals = useMemo(() => {
+    const totalInflow = cashFlowData.reduce((sum, point) => sum + point.inflow, 0)
+    const totalOutflow = cashFlowData.reduce((sum, point) => sum + point.outflow, 0)
+
+    return {
+      inflow: totalInflow,
+      outflow: totalOutflow,
+      net: totalInflow - totalOutflow,
+    }
+  }, [cashFlowData])
 
   return (
     <Card className="flex h-full flex-col border-border/50 bg-card">
@@ -34,10 +54,39 @@ export function RecentTransactions({ transactions, cashFlowData, loading = false
       </CardHeader>
       <CardContent className="flex flex-1 flex-col pt-2">
         {/* Cash Flow Chart */}
-        <div className="mb-4 h-30 w-full">
+        <div className="mb-4 h-44 w-full">
           <p className="mb-2 text-xs text-muted-foreground">Cash Flow - Last 30 Days</p>
+          <div className="mb-2 grid grid-cols-3 gap-2 text-[11px]">
+            <div className="rounded border border-emerald-500/25 bg-emerald-500/10 px-2 py-1 text-emerald-200">
+              Inflow: ₹{totals.inflow.toLocaleString("en-IN")}
+            </div>
+            <div className="rounded border border-red-500/25 bg-red-500/10 px-2 py-1 text-red-200">
+              Outflow: ₹{totals.outflow.toLocaleString("en-IN")}
+            </div>
+            <div
+              className={cn(
+                "rounded border px-2 py-1",
+                totals.net >= 0
+                  ? "border-cyan-500/25 bg-cyan-500/10 text-cyan-200"
+                  : "border-amber-500/25 bg-amber-500/10 text-amber-200"
+              )}
+            >
+              Net: ₹{totals.net.toLocaleString("en-IN")}
+            </div>
+          </div>
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={cashFlowData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+            <LineChart data={chartData} margin={{ top: 5, right: 8, left: -14, bottom: 0 }}>
+              <defs>
+                <linearGradient id="cashInflowFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#22c55e" stopOpacity={0.32} />
+                  <stop offset="100%" stopColor="#22c55e" stopOpacity={0.02} />
+                </linearGradient>
+                <linearGradient id="cashOutflowFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#ef4444" stopOpacity={0.3} />
+                  <stop offset="100%" stopColor="#ef4444" stopOpacity={0.02} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.16)" />
               <XAxis
                 dataKey="date"
                 tick={{ fill: "#6b7280", fontSize: 10 }}
@@ -51,6 +100,7 @@ export function RecentTransactions({ transactions, cashFlowData, loading = false
                 tickLine={false}
                 tickFormatter={(value) => `₹${(value / 1000).toFixed(0)}k`}
               />
+              <ReferenceLine y={0} stroke="rgba(148,163,184,0.35)" strokeDasharray="3 3" />
               <Tooltip
                 contentStyle={{
                   backgroundColor: "#1f2937",
@@ -62,22 +112,52 @@ export function RecentTransactions({ transactions, cashFlowData, loading = false
                 labelStyle={{ color: "#f3f4f6", fontWeight: 500, marginBottom: "4px" }}
                 formatter={(value: number, name: string) => [
                   `₹${value.toLocaleString("en-IN")}`,
-                  name === "inflow" ? "Payments Received" : "Supplies Purchased",
+                  name === "inflow"
+                    ? "Payments Received"
+                    : name === "outflow"
+                      ? "Supplies Purchased"
+                      : "Net Cashflow",
                 ]}
               />
-              <Line
-                type="monotone"
+              <Legend wrapperStyle={{ fontSize: "11px" }} />
+              <Area
+                type="natural"
                 dataKey="inflow"
-                stroke="#22c55e"
-                strokeWidth={2}
-                dot={false}
+                stroke="none"
+                fill="url(#cashInflowFill)"
+                name="Inflow"
+              />
+              <Area
+                type="natural"
+                dataKey="outflow"
+                stroke="none"
+                fill="url(#cashOutflowFill)"
+                name="Outflow"
               />
               <Line
-                type="monotone"
+                type="natural"
+                dataKey="inflow"
+                stroke="#22c55e"
+                strokeWidth={2.5}
+                dot={false}
+                name="Inflow"
+              />
+              <Line
+                type="natural"
                 dataKey="outflow"
                 stroke="#ef4444"
+                strokeWidth={2.5}
+                dot={false}
+                name="Outflow"
+              />
+              <Line
+                type="natural"
+                dataKey="net"
+                stroke="#38bdf8"
                 strokeWidth={2}
                 dot={false}
+                strokeDasharray="5 4"
+                name="Net"
               />
             </LineChart>
           </ResponsiveContainer>
@@ -94,7 +174,7 @@ export function RecentTransactions({ transactions, cashFlowData, loading = false
         </div>
 
         {/* Transaction List */}
-        <ScrollArea className="flex-1">
+        <ScrollArea className="max-h-88 flex-1">
           <div className="space-y-3">
             {boundedTransactions.map((transaction) => (
               <div

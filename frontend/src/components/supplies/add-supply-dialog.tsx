@@ -95,18 +95,27 @@ export function AddBillDialog({
     queryKey: ["vendors", userId],
     queryFn: () => getVendors(userId),
     enabled: open,
+    staleTime: 2 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
   })
 
   const vendorCommoditiesQuery = useQuery({
     queryKey: ["vendor-commodities", userId, selectedVendorId],
     queryFn: () => getVendorCommodities(userId, selectedVendorId),
     enabled: open && selectedVendorId.length > 0,
+    staleTime: 2 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
   })
 
   const userCommoditiesQuery = useQuery({
     queryKey: ["commodities", userId],
     queryFn: () => getCommodities(userId),
     enabled: open,
+    staleTime: 2 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
   })
 
   const vendorCommodities = vendorCommoditiesQuery.data ?? []

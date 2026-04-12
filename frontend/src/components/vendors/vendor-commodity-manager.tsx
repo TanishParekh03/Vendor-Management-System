@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link2, PackagePlus, Unlink2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -31,49 +32,33 @@ export function VendorCommodityManager({
   showLinkedActions = true,
   compact = false,
 }: VendorCommodityManagerProps) {
-  const [allCommodities, setAllCommodities] = useState<BackendCommodity[]>([])
+  const queryClient = useQueryClient()
   const [selectedCommodityId, setSelectedCommodityId] = useState<string>("")
   const [newCommodityName, setNewCommodityName] = useState("")
   const [newCommodityQuantity, setNewCommodityQuantity] = useState("0")
   const [newCommodityUnit, setNewCommodityUnit] = useState("kg")
-  const [loading, setLoading] = useState(true)
   const [adding, setAdding] = useState(false)
   const [creating, setCreating] = useState(false)
   const [removingCommodityId, setRemovingCommodityId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    let ignore = false
+  const commoditiesQuery = useQuery({
+    queryKey: ["commodities", userId],
+    queryFn: () => getCommodities(userId),
+    staleTime: 2 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  })
 
-    async function loadCommodities() {
-      setLoading(true)
-      setError(null)
-
-      try {
-        const items = await getCommodities(userId)
-        if (!ignore) {
-          setAllCommodities(items)
-        }
-      } catch (loadError) {
-        if (ignore) return
-        const message =
-          loadError instanceof ApiRequestError
-            ? loadError.message
-            : "Failed to load commodities"
-        setError(message)
-      } finally {
-        if (!ignore) {
-          setLoading(false)
-        }
-      }
-    }
-
-    void loadCommodities()
-
-    return () => {
-      ignore = true
-    }
-  }, [userId])
+  const allCommodities = commoditiesQuery.data ?? []
+  const loading = commoditiesQuery.isLoading
+  const commoditiesLoadError =
+    commoditiesQuery.error instanceof ApiRequestError
+      ? commoditiesQuery.error.message
+      : commoditiesQuery.error
+        ? "Failed to load commodities"
+        : null
+  const combinedError = error ?? commoditiesLoadError
 
   const availableCommodities = useMemo(() => {
     const linkedSet = new Set(linkedCommodities.map((commodity) => commodity.id))
@@ -95,7 +80,10 @@ export function VendorCommodityManager({
       setError(null)
       await linkCommodityToVendor(userId, vendorId, selectedCommodityId)
       setSelectedCommodityId("")
-      await onChanged()
+      await Promise.all([
+        onChanged(),
+        queryClient.invalidateQueries({ queryKey: ["commodities", userId] }),
+      ])
     } catch (saveError) {
       console.error("[VendorCommodityManager] Quick Assign failed", {
         userId,
@@ -151,13 +139,6 @@ export function VendorCommodityManager({
 
       const commodityToAssign = commodity
 
-      setAllCommodities((prev) => {
-        if (prev.some((item) => item.id === commodityToAssign.id)) {
-          return prev
-        }
-        return [...prev, commodityToAssign]
-      })
-
       if (commodityAlreadyLinked(commodityToAssign.id)) {
         setError("Commodity is already linked to this vendor")
         return
@@ -167,7 +148,10 @@ export function VendorCommodityManager({
       setNewCommodityName("")
       setNewCommodityQuantity("0")
       setNewCommodityUnit("kg")
-      await onChanged()
+      await Promise.all([
+        onChanged(),
+        queryClient.invalidateQueries({ queryKey: ["commodities", userId] }),
+      ])
     } catch (createError) {
       console.error("[VendorCommodityManager] Create & Assign failed", {
         userId,
@@ -193,7 +177,10 @@ export function VendorCommodityManager({
       setRemovingCommodityId(commodityId)
       setError(null)
       await unlinkCommodityFromVendor(userId, vendorId, commodityId)
-      await onChanged()
+      await Promise.all([
+        onChanged(),
+        queryClient.invalidateQueries({ queryKey: ["commodities", userId] }),
+      ])
     } catch (removeError) {
       const message =
         removeError instanceof ApiRequestError
@@ -249,7 +236,7 @@ export function VendorCommodityManager({
                   variant="outline"
                   onClick={() => {
                     setSelectedCommodityId(String(commodity.id))
-                    if (error) setError(null)
+                    if (combinedError) setError(null)
                   }}
                   className={
                     selectedCommodityId === String(commodity.id)
@@ -295,7 +282,7 @@ export function VendorCommodityManager({
               value={newCommodityName}
               onChange={(event) => {
                 setNewCommodityName(event.target.value)
-                if (error) setError(null)
+                if (combinedError) setError(null)
               }}
               placeholder="e.g. Turmeric"
               className="w-full bg-secondary"
@@ -312,7 +299,7 @@ export function VendorCommodityManager({
               value={newCommodityQuantity}
               onChange={(event) => {
                 setNewCommodityQuantity(event.target.value)
-                if (error) setError(null)
+                if (combinedError) setError(null)
               }}
               className="w-full bg-secondary"
             />
@@ -380,9 +367,9 @@ export function VendorCommodityManager({
         </div>
       )}
 
-      {error && (
+      {combinedError && (
         <p className="rounded-md border border-red-500/30 bg-red-500/10 px-2 py-1 text-xs text-red-300">
-          {error}
+          {combinedError}
         </p>
       )}
     </div>

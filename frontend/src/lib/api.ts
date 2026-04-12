@@ -66,22 +66,13 @@ export type BackendBillWithItems = BackendBill & {
   items: BackendBillItem[]
 }
 
-export type BackendPaymentLog = {
-  id: string
-  user_id: string
-  vendor_id: string
-  bill_id: string
-  amount_paid: number | string
-  payment_mode: string
-  payment_date?: string
-}
-
 export type BackendPayment = {
   id: string
   user_id: string
   vendor_id: string
   bill_id: string
   amount: number | string
+  payment_mode: "cash" | "upi"
   payment_date?: string
 }
 
@@ -132,30 +123,98 @@ export type SmartVendorRecommendationResponse = {
   }
 }
 
-export type AddPaymentLogPayload = {
-  vendor_id: string
-  bill_id: string
-  amount_paid: number
-  payment_mode: string
+export type BackendLowStockCommodity = {
+  commodity_id: string
+  commodity_name: string
+  current_quantity: number | string
+  min_quantity: number | string
+  max_quantity?: number | string | null
+  shortage: number | string
 }
 
 export type AddPaymentPayload = {
   vendorId: string
   billId: string
   amount: number
-}
-
-export type AddPaymentLogResponse = {
-  success: boolean
-  msg: string
-  payment_log: BackendPaymentLog
-  bill: BackendBill
+  paymentMode: "cash" | "upi"
 }
 
 export type AddPaymentResponse = {
   msg: string
   payment: BackendPayment
   bill: BackendBill
+}
+
+export type BackendDailyLog = {
+  id: string
+  user_id: string
+  log_type: "received" | "paid" | "commodity"
+  amount: number | string
+  log_date: string
+  note?: string | null
+  created_at?: string
+  updated_at?: string
+}
+
+export type DailyLogAnalyticsView = "daily" | "monthly" | "yearly"
+
+export type BackendDailyLogAnalyticsPoint = {
+  bucket_key: string
+  bucket_label: string
+  received: number
+  paid: number
+  net: number
+  transactions: number
+}
+
+export type BackendDailyLogAnalyticsInsight = {
+  type: "good" | "warning" | "neutral"
+  title: string
+  detail: string
+}
+
+export type BackendDailyLogAnalyticsResponse = {
+  view: DailyLogAnalyticsView
+  selection: {
+    view: DailyLogAnalyticsView
+    date?: string
+    month?: string
+    year?: number
+  }
+  range: {
+    from: string
+    to: string
+  }
+  summary: {
+    total_received: number
+    total_paid: number
+    net_balance: number
+    transaction_count: number
+    profitable_buckets: number
+    loss_buckets: number
+    trend_direction: "improving" | "declining" | "stable"
+  }
+  series: BackendDailyLogAnalyticsPoint[]
+  top_vendor: {
+    name: string
+    amount: number
+  } | null
+  payment_modes: Array<{
+    mode: string
+    amount: number
+  }>
+  insights: BackendDailyLogAnalyticsInsight[]
+  logs: Array<{
+    id: string
+    source: "payments" | "daily_logs"
+    log_type: "received" | "paid"
+    amount: number
+    log_date: string
+    note?: string | null
+    vendor_name?: string | null
+    bill_id?: string | null
+    payment_mode?: string | null
+  }>
 }
 
 export type RegisterResponse = {
@@ -546,15 +605,6 @@ export async function deleteBill(userId: string, billId: string): Promise<void> 
   })
 }
 
-export async function getVendorPaymentLogs(userId: string, vendorId: string): Promise<BackendPaymentLog[]> {
-  return getListOrEmpty(async () => {
-    const data = await request<{ payment_logs: BackendPaymentLog[] }>(
-      `/users/${userId}/vendors/${vendorId}/payment-logs`
-    )
-    return data.payment_logs
-  })
-}
-
 export async function getVendorPayments(userId: string, vendorId: string): Promise<BackendPayment[]> {
   return getListOrEmpty(async () => {
     const data = await request<{ payments: BackendPayment[] }>(
@@ -564,26 +614,10 @@ export async function getVendorPayments(userId: string, vendorId: string): Promi
   })
 }
 
-export async function getPaymentLogs(userId: string): Promise<BackendPaymentLog[]> {
-  return getListOrEmpty(async () => {
-    const data = await request<{ payment_logs: BackendPaymentLog[] }>(`/users/${userId}/payment-logs`)
-    return data.payment_logs
-  })
-}
-
 export async function getPayments(userId: string): Promise<BackendPayment[]> {
   return getListOrEmpty(async () => {
     const data = await request<{ payments: BackendPayment[] }>(`/users/${userId}/payments`)
     return data.payments
-  })
-}
-
-export async function getBillPaymentLogs(userId: string, billId: string): Promise<BackendPaymentLog[]> {
-  return getListOrEmpty(async () => {
-    const data = await request<{ payment_logs: BackendPaymentLog[] }>(
-      `/users/${userId}/bills/${billId}/payment-logs`
-    )
-    return data.payment_logs
   })
 }
 
@@ -596,16 +630,6 @@ export async function getBillPayments(userId: string, billId: string): Promise<B
   })
 }
 
-export async function addPaymentLog(
-  userId: string,
-  payload: AddPaymentLogPayload
-): Promise<AddPaymentLogResponse> {
-  return request<AddPaymentLogResponse>(`/users/${userId}/payment-logs`, {
-    method: "POST",
-    body: JSON.stringify(payload),
-  })
-}
-
 export async function addPayment(
   userId: string,
   payload: AddPaymentPayload
@@ -614,6 +638,85 @@ export async function addPayment(
     method: "POST",
     body: JSON.stringify(payload),
   })
+}
+
+export async function getDailyLogs(
+  userId: string,
+  options?: {
+    logType?: "received" | "paid" | "commodity"
+    fromDate?: string
+    toDate?: string
+    limit?: number
+  }
+): Promise<BackendDailyLog[]> {
+  const params = new URLSearchParams()
+  if (options?.logType) params.set("log_type", options.logType)
+  if (options?.fromDate) params.set("from_date", options.fromDate)
+  if (options?.toDate) params.set("to_date", options.toDate)
+  if (options?.limit) params.set("limit", String(options.limit))
+
+  const query = params.toString()
+  const path = query.length > 0
+    ? `/users/${userId}/daily-logs?${query}`
+    : `/users/${userId}/daily-logs`
+
+  return getListOrEmpty(async () => {
+    const data = await request<{ daily_logs: BackendDailyLog[] }>(path)
+    return data.daily_logs
+  })
+}
+
+export async function addDailyLog(
+  userId: string,
+  payload: {
+    logType: "received" | "paid" | "commodity"
+    amount: number
+    logDate?: string
+    note?: string
+  }
+): Promise<BackendDailyLog> {
+  const data = await request<{
+    success: boolean
+    msg: string
+    daily_log: BackendDailyLog
+  }>(`/users/${userId}/daily-logs`, {
+    method: "POST",
+    body: JSON.stringify({
+      log_type: payload.logType,
+      amount: payload.amount,
+      log_date: payload.logDate,
+      note: payload.note,
+    }),
+  })
+
+  return data.daily_log
+}
+
+export async function deleteDailyLog(userId: string, logId: string): Promise<void> {
+  await request<{ success: boolean; msg: string }>(`/users/${userId}/daily-logs/${logId}`, {
+    method: "DELETE",
+  })
+}
+
+export async function getDailyLogAnalytics(
+  userId: string,
+  options: {
+    view: DailyLogAnalyticsView
+    date?: string
+    month?: string
+    year?: number
+    limit?: number
+  }
+): Promise<BackendDailyLogAnalyticsResponse> {
+  const params = new URLSearchParams()
+  params.set("view", options.view)
+  if (options.date) params.set("date", options.date)
+  if (options.month) params.set("month", options.month)
+  if (typeof options.year === "number") params.set("year", String(options.year))
+  if (typeof options.limit === "number") params.set("limit", String(options.limit))
+
+  const query = params.toString()
+  return request<BackendDailyLogAnalyticsResponse>(`/users/${userId}/daily-logs/analytics?${query}`)
 }
 
 export async function getPaymentSuggestion(
@@ -652,6 +755,24 @@ export async function getPaymentPriorityList(
 
     if (Array.isArray(data.payment_priorities)) {
       return data.payment_priorities
+    }
+
+    return []
+  })
+}
+
+export async function getLowStockCommodities(
+  userId: string
+): Promise<BackendLowStockCommodity[]> {
+  return getListOrEmpty(async () => {
+    const data = await request<{
+      msg?: string
+      low_stock_items?: BackendLowStockCommodity[]
+      total_items?: number
+    }>(`/users/${userId}/purchase/low-stock-alerts`)
+
+    if (Array.isArray(data.low_stock_items)) {
+      return data.low_stock_items
     }
 
     return []

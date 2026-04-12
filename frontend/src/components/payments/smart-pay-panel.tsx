@@ -8,6 +8,13 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import {
   addPayment,
@@ -67,6 +74,7 @@ export function SmartPayPanel() {
   const queryClient = useQueryClient()
   const userId = getCurrentUserId()
   const [cashAvailable, setCashAvailable] = useState<string>("")
+  const [paymentMode, setPaymentMode] = useState<"cash" | "upi">("upi")
   const [showPlan, setShowPlan] = useState(false)
   const [paidItems, setPaidItems] = useState<Set<string>>(new Set())
   const [actionError, setActionError] = useState<string | null>(null)
@@ -74,6 +82,9 @@ export function SmartPayPanel() {
   const suggestionQuery = useQuery({
     queryKey: ["payment-priority", userId],
     queryFn: () => getPaymentPriorityList(userId),
+    staleTime: 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
   })
 
   const suggestedVendors = suggestionQuery.data ?? []
@@ -92,16 +103,20 @@ export function SmartPayPanel() {
 
       return Object.fromEntries(entries) as Record<string, BackendBill[]>
     },
+    staleTime: 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
   })
 
   const addPaymentMutation = useMutation({
-    mutationFn: (payload: { vendorId: string; billId: string; amount: number }) =>
+    mutationFn: (payload: { vendorId: string; billId: string; amount: number; paymentMode: "cash" | "upi" }) =>
       addPayment(userId, payload),
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["payment-priority", userId] }),
         queryClient.invalidateQueries({ queryKey: ["payment-suggestion-bills", userId] }),
-        queryClient.invalidateQueries({ queryKey: ["payment-logs", userId] }),
+        queryClient.invalidateQueries({ queryKey: ["payments", userId] }),
+        queryClient.invalidateQueries({ queryKey: ["daily-paid-entries", userId] }),
         queryClient.invalidateQueries({ queryKey: ["vendor-bills", userId] }),
         queryClient.invalidateQueries({ queryKey: ["vendors-hydrated", userId] }),
       ])
@@ -129,6 +144,7 @@ export function SmartPayPanel() {
         vendorId: item.vendorId,
         billId: item.billId,
         amount: item.suggestedAmount,
+        paymentMode,
       })
       setPaidItems((prev) => new Set([...prev, `${item.vendorId}-${item.billId}`]))
     } catch (error) {
@@ -237,6 +253,15 @@ export function SmartPayPanel() {
                 className="bg-secondary pl-9 font-mono"
               />
             </div>
+            <Select value={paymentMode} onValueChange={(value: "cash" | "upi") => setPaymentMode(value)}>
+              <SelectTrigger className="w-35 bg-secondary">
+                <SelectValue placeholder="Payment mode" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="upi">UPI</SelectItem>
+                <SelectItem value="cash">Cash</SelectItem>
+              </SelectContent>
+            </Select>
             <Button
               onClick={handleGeneratePlan}
               className="bg-emerald-600 text-white hover:bg-emerald-700"

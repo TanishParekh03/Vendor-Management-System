@@ -76,6 +76,9 @@ export function SuppliesTable() {
   const vendorsQuery = useQuery({
     queryKey: ["vendors", userId],
     queryFn: () => getVendors(userId),
+    staleTime: 2 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
   })
 
   const billsQuery = useQuery({
@@ -97,6 +100,9 @@ export function SuppliesTable() {
 
       return detailedBills.filter((bill): bill is BackendBillWithItems => bill !== null)
     },
+    staleTime: 2 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
   })
 
   const rows = useMemo(() => {
