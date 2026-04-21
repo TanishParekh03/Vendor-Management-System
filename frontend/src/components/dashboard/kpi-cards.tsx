@@ -1,7 +1,6 @@
 "use client"
 
 import { TrendingDown, Wallet, Users, AlertTriangle } from "lucide-react"
-import { Card, CardContent } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 import type { DashboardMetrics } from "./dashboard-data"
 
@@ -12,53 +11,55 @@ interface KPICardProps {
   accent: "danger" | "success" | "info" | "warning"
   isCurrency?: boolean
   showPulse?: boolean
+  fieldCode: string
 }
 
-function KPICard({ title, value, icon, accent, isCurrency, showPulse }: KPICardProps) {
-  const accentStyles = {
-    danger: "text-red-500 bg-red-500/10 border-red-500/20",
-    success: "text-emerald-500 bg-emerald-500/10 border-emerald-500/20",
-    info: "text-blue-500 bg-blue-500/10 border-blue-500/20",
-    warning: "text-amber-500 bg-amber-500/10 border-amber-500/20",
+function KPICard({ title, value, icon, accent, isCurrency, showPulse, fieldCode }: KPICardProps) {
+  const accentRing = {
+    danger: "before:bg-destructive",
+    success: "before:bg-forest",
+    info: "before:bg-forest-soft",
+    warning: "before:bg-amber",
   }
 
-  const iconBgStyles = {
-    danger: "bg-red-500/10",
-    success: "bg-emerald-500/10",
-    info: "bg-blue-500/10",
-    warning: "bg-amber-500/10",
-  }
-
-  const iconColorStyles = {
-    danger: "text-red-500",
-    success: "text-emerald-500",
-    info: "text-blue-500",
-    warning: "text-amber-500",
+  const iconStyle = {
+    danger: "bg-destructive/10 text-destructive",
+    success: "bg-forest text-cream",
+    info: "bg-forest-soft/15 text-forest",
+    warning: "bg-amber/20 text-amber-deep",
   }
 
   return (
-    <Card className={cn("border-border/50 bg-card transition-all hover:border-white/20", accentStyles[accent])}>
-      <CardContent className="p-4">
-        <div className="flex items-start justify-between">
-          <div className="space-y-1.5">
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</p>
-            <p className="font-mono text-xl font-bold text-card-foreground">
-              {typeof value === "number" && isCurrency
-                ? `₹${value.toLocaleString("en-IN")}`
-                : value}
-            </p>
+    <div
+      className={cn(
+        "kv-card relative overflow-hidden p-4",
+        "before:absolute before:left-0 before:top-0 before:h-full before:w-1",
+        accentRing[accent]
+      )}
+    >
+      <div className="flex items-start justify-between">
+        <div className="space-y-1 pl-2">
+          <div className="flex items-center gap-2">
+            <p className="kv-microprint-sm text-muted-foreground">{title}</p>
+            <span className="kv-microprint-sm text-forest/40">&middot; {fieldCode}</span>
           </div>
-          <div className="relative">
-            <div className={cn("rounded-lg p-2", iconBgStyles[accent])}>
-              <div className={iconColorStyles[accent]}>{icon}</div>
-            </div>
-            {showPulse && (
-              <span className="pulse-dot absolute -right-1 -top-1 h-3 w-3 rounded-full bg-amber-500" />
-            )}
-          </div>
+          <p
+            className="text-2xl text-forest"
+            style={{ fontFamily: "var(--font-serif)", fontWeight: 500, letterSpacing: "-0.01em" }}
+          >
+            {typeof value === "number" && isCurrency
+              ? `Rs ${value.toLocaleString("en-IN")}`
+              : value}
+          </p>
         </div>
-      </CardContent>
-    </Card>
+        <div className="relative">
+          <div className={cn("rounded-md p-2", iconStyle[accent])}>{icon}</div>
+          {showPulse && (
+            <span className="kv-pulse-dot absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-amber" />
+          )}
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -72,28 +73,32 @@ export function KPICards({ metrics, loading = false }: KPICardsProps) {
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       <KPICard
         title="Total Debt"
+        fieldCode="M01"
         value={loading ? "..." : metrics.totalOutstandingDebt}
-        icon={<TrendingDown className="h-5 w-5" />}
+        icon={<TrendingDown className="h-4 w-4" />}
         accent="danger"
         isCurrency
       />
       <KPICard
         title="Cash In Hand"
+        fieldCode="M02"
         value={loading ? "..." : metrics.cashInHand}
-        icon={<Wallet className="h-5 w-5" />}
+        icon={<Wallet className="h-4 w-4" />}
         accent="success"
         isCurrency
       />
       <KPICard
         title="Active Vendors"
+        fieldCode="M03"
         value={loading ? "..." : metrics.activeVendors}
-        icon={<Users className="h-5 w-5" />}
+        icon={<Users className="h-4 w-4" />}
         accent="info"
       />
       <KPICard
         title="Low Stock Alerts"
+        fieldCode="M04"
         value={loading ? "..." : metrics.lowStockAlerts}
-        icon={<AlertTriangle className="h-5 w-5" />}
+        icon={<AlertTriangle className="h-4 w-4" />}
         accent="warning"
         showPulse={!loading && metrics.lowStockAlerts > 0}
       />

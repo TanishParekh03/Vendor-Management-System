@@ -26,8 +26,8 @@ export function MobileNav() {
   const { pathname } = useLocation()
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-border/50 bg-sidebar/95 backdrop-blur-lg">
-      <div className="flex items-center justify-around py-2">
+    <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-cream-card/95 backdrop-blur-lg">
+      <div className="flex items-center justify-around py-1.5">
         {navItems.map((item) => {
           const isActive = pathname === item.href
           const Icon = item.icon
@@ -37,13 +37,21 @@ export function MobileNav() {
               key={item.href}
               to={item.href}
               className={cn(
-                "flex flex-col items-center gap-1 rounded-lg px-3 py-1.5 text-xs transition-colors",
+                "flex flex-col items-center gap-0.5 rounded-md px-2 py-1 text-[10px] font-medium transition-colors",
                 isActive
-                  ? "text-primary"
-                  : "text-muted-foreground hover:text-foreground"
+                  ? "text-forest"
+                  : "text-muted-foreground hover:text-forest"
               )}
+              style={{ letterSpacing: "0.08em", textTransform: "uppercase" }}
             >
-              <Icon className={cn("h-5 w-5", isActive && "text-primary")} />
+              <span
+                className={cn(
+                  "flex h-8 w-8 items-center justify-center rounded-md",
+                  isActive ? "bg-forest text-cream" : "bg-transparent"
+                )}
+              >
+                <Icon className="h-4 w-4" />
+              </span>
               <span className="truncate">{item.label}</span>
             </Link>
           )

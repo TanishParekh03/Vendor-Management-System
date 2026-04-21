@@ -523,11 +523,34 @@ export default function DailyLogsPage() {
   return (
     <DashboardLayout>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Daily Logs</h1>
-          <p className="text-muted-foreground">
-            Track financial entries and manage commodity quantities in separate workflows.
-          </p>
+        <div className="kv-page-reveal flex flex-wrap items-end justify-between gap-4 border-b border-border pb-6">
+          <div>
+            <p className="kv-microprint text-muted-foreground">Section 05 · Operator Timeline</p>
+            <h1
+              className="mt-2 text-5xl text-forest"
+              style={{ fontFamily: "var(--font-serif)", fontWeight: 500, lineHeight: 1, letterSpacing: "-0.025em" }}
+            >
+              Daily Logs
+            </h1>
+            <p className="mt-3 max-w-xl text-sm text-muted-foreground">
+              Track financial entries and manage commodity quantities in a unified, notarized daily
+              timeline.
+            </p>
+          </div>
+          <div className="flex items-center gap-3 rounded-lg border border-border bg-cream-card px-4 py-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-md bg-forest text-cream">
+              <ClipboardList className="h-4 w-4" />
+            </div>
+            <div>
+              <p className="kv-microprint-sm text-muted-foreground">Module</p>
+              <p
+                className="text-sm text-forest"
+                style={{ fontFamily: "var(--font-serif)", fontWeight: 600 }}
+              >
+                DL &middot; Daily Timeline
+              </p>
+            </div>
+          </div>
         </div>
 
         <Card className="border-border/50 bg-card">

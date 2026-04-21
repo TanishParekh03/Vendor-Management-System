@@ -13,8 +13,6 @@ import {
   YAxis,
 } from "recharts"
 import { TrendingUp } from "lucide-react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import {
   Select,
@@ -44,12 +42,12 @@ function getLocalMonthValue(date = new Date()): string {
 
 function getInsightStyle(type: "good" | "warning" | "neutral"): string {
   if (type === "good") {
-    return "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+    return "border-forest/30 bg-forest/5 text-forest"
   }
   if (type === "warning") {
-    return "border-rose-500/30 bg-rose-500/10 text-rose-200"
+    return "border-destructive/30 bg-destructive/5 text-destructive"
   }
-  return "border-cyan-500/30 bg-cyan-500/10 text-cyan-200"
+  return "border-amber/40 bg-amber/10 text-amber-deep"
 }
 
 function formatDateTime(value?: string): string {
@@ -108,17 +106,25 @@ export function FinancialAnalysis() {
         : "Unable to load dashboard analysis"
 
   return (
-    <Card className="border-border/50 bg-card">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-lg font-semibold text-card-foreground">
-          <TrendingUp className="h-5 w-5 text-indigo-300" />
-          Financial Analysis
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid gap-3 md:grid-cols-[180px_1fr]">
+    <section className="kv-card overflow-hidden">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-cream-muted/50 px-5 py-4">
+        <div className="flex items-center gap-2">
+          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-forest text-cream">
+            <TrendingUp className="h-4 w-4" />
+          </div>
+          <div>
+            <p className="kv-microprint-sm text-muted-foreground">Section 03 · Ledger</p>
+            <h3
+              className="text-lg text-forest"
+              style={{ fontFamily: "var(--font-serif)", fontWeight: 600 }}
+            >
+              Financial Analysis
+            </h3>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
           <Select value={view} onValueChange={(value) => setView(value as DailyLogAnalyticsView)}>
-            <SelectTrigger className="bg-secondary">
+            <SelectTrigger className="w-32 border-border bg-background">
               <SelectValue placeholder="Select view" />
             </SelectTrigger>
             <SelectContent>
@@ -133,7 +139,7 @@ export function FinancialAnalysis() {
               type="date"
               value={selectedDate}
               onChange={(event) => setSelectedDate(event.target.value)}
-              className="bg-secondary"
+              className="w-40 border-border bg-background"
             />
           )}
           {view === "monthly" && (
@@ -141,34 +147,37 @@ export function FinancialAnalysis() {
               type="month"
               value={selectedMonth}
               onChange={(event) => setSelectedMonth(event.target.value)}
-              className="bg-secondary"
+              className="w-40 border-border bg-background"
             />
           )}
           {view === "yearly" && (
-            <div className="space-y-1">
-              <Input
-                type="number"
-                min={2000}
-                max={2200}
-                value={selectedYear}
-                onChange={(event) => setSelectedYear(event.target.value)}
-                className="bg-secondary"
-              />
-              {!isYearValid && (
-                <p className="text-xs text-rose-300">Enter a year between 2000 and 2200.</p>
-              )}
-            </div>
+            <Input
+              type="number"
+              min={2000}
+              max={2200}
+              value={selectedYear}
+              onChange={(event) => setSelectedYear(event.target.value)}
+              className="w-28 border-border bg-background"
+            />
           )}
         </div>
+      </div>
+
+      <div className="space-y-5 p-5">
+        {view === "yearly" && !isYearValid && (
+          <p className="kv-microprint-sm text-destructive">
+            Enter a year between 2000 and 2200.
+          </p>
+        )}
 
         {analyticsQuery.isLoading && (
-          <div className="rounded-lg border border-border/50 bg-secondary/20 p-3 text-sm text-muted-foreground">
+          <div className="rounded-md border border-border bg-cream-muted/50 p-3 text-sm text-muted-foreground">
             Loading analysis...
           </div>
         )}
 
         {analyticsQuery.isError && (
-          <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
+          <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
             {errorMessage}
           </div>
         )}
@@ -176,58 +185,63 @@ export function FinancialAnalysis() {
         {!analyticsQuery.isLoading && !analyticsQuery.isError && summary && (
           <>
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 p-3">
-                <p className="text-xs text-cyan-200/90">Received</p>
-                <p className="font-mono text-lg font-semibold text-cyan-200">
-                  Rs {summary.total_received.toLocaleString("en-IN")}
-                </p>
-              </div>
-              <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3">
-                <p className="text-xs text-rose-200/90">Paid</p>
-                <p className="font-mono text-lg font-semibold text-rose-200">
-                  Rs {summary.total_paid.toLocaleString("en-IN")}
-                </p>
-              </div>
-              <div className="rounded-lg border border-indigo-500/30 bg-indigo-500/10 p-3">
-                <p className="text-xs text-indigo-200/90">Net Balance</p>
-                <p
+              {[
+                { label: "RECEIVED", value: summary.total_received, tone: "forest" as const },
+                { label: "PAID", value: summary.total_paid, tone: "destructive" as const },
+                { label: "NET BALANCE", value: summary.net_balance, tone: summary.net_balance >= 0 ? "forest" : "destructive" },
+                { label: "TRANSACTIONS", value: summary.transaction_count, tone: "amber" as const, noCurrency: true },
+              ].map((stat) => (
+                <div
+                  key={stat.label}
                   className={cn(
-                    "font-mono text-lg font-semibold",
-                    summary.net_balance >= 0 ? "text-emerald-300" : "text-rose-300"
+                    "kv-card relative overflow-hidden p-4",
+                    "before:absolute before:left-0 before:top-0 before:h-full before:w-1",
+                    stat.tone === "forest" && "before:bg-forest",
+                    stat.tone === "destructive" && "before:bg-destructive",
+                    stat.tone === "amber" && "before:bg-amber"
                   )}
                 >
-                  Rs {summary.net_balance.toLocaleString("en-IN")}
-                </p>
-              </div>
-              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
-                <p className="text-xs text-amber-200/90">Transactions</p>
-                <p className="font-mono text-lg font-semibold text-amber-200">
-                  {summary.transaction_count.toLocaleString("en-IN")}
-                </p>
-              </div>
+                  <p className="kv-microprint-sm text-muted-foreground">{stat.label}</p>
+                  <p
+                    className={cn(
+                      "mt-1 font-mono text-xl font-semibold",
+                      stat.tone === "forest" && "text-forest",
+                      stat.tone === "destructive" && "text-destructive",
+                      stat.tone === "amber" && "text-amber-deep"
+                    )}
+                  >
+                    {stat.noCurrency
+                      ? Number(stat.value).toLocaleString("en-IN")
+                      : `Rs ${Number(stat.value).toLocaleString("en-IN")}`}
+                  </p>
+                </div>
+              ))}
             </div>
 
-            <div className="h-72 w-full rounded-lg border border-border/50 bg-secondary/20 p-2">
+            <div className="kv-card h-72 w-full overflow-hidden p-3">
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart data={series} margin={{ top: 10, right: 14, left: 0, bottom: 4 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(26, 61, 42, 0.1)" />
                   <XAxis
                     dataKey="bucket_label"
-                    tick={{ fill: "#94a3b8", fontSize: 12 }}
-                    axisLine={{ stroke: "rgba(148,163,184,0.35)" }}
-                    tickLine={{ stroke: "rgba(148,163,184,0.35)" }}
+                    tick={{ fill: "#5a6b5e", fontSize: 12 }}
+                    axisLine={{ stroke: "rgba(26, 61, 42, 0.2)" }}
+                    tickLine={{ stroke: "rgba(26, 61, 42, 0.2)" }}
                   />
                   <YAxis
                     yAxisId="amount"
-                    tick={{ fill: "#94a3b8", fontSize: 12 }}
-                    axisLine={{ stroke: "rgba(148,163,184,0.35)" }}
-                    tickLine={{ stroke: "rgba(148,163,184,0.35)" }}
+                    tick={{ fill: "#5a6b5e", fontSize: 12 }}
+                    axisLine={{ stroke: "rgba(26, 61, 42, 0.2)" }}
+                    tickLine={{ stroke: "rgba(26, 61, 42, 0.2)" }}
                   />
                   <Tooltip
                     contentStyle={{
-                      backgroundColor: "#0f172a",
-                      border: "1px solid rgba(148,163,184,0.35)",
-                      borderRadius: "10px",
+                      backgroundColor: "#fbf9f5",
+                      border: "1px solid #d6d0c4",
+                      borderRadius: "6px",
+                      color: "#1a3d2a",
+                      fontFamily: "JetBrains Mono, monospace",
+                      fontSize: "12px",
                     }}
                     formatter={(value, name) => {
                       if (name === "transactions") {
@@ -236,9 +250,9 @@ export function FinancialAnalysis() {
                       return [`Rs ${Number(value).toLocaleString("en-IN")}`, name]
                     }}
                   />
-                  <Bar yAxisId="amount" dataKey="paid" fill="#f43f5e" radius={[4, 4, 0, 0]} />
-                  <Line yAxisId="amount" dataKey="received" stroke="#06b6d4" strokeWidth={2} dot={false} />
-                  <Line yAxisId="amount" dataKey="net" stroke="#f59e0b" strokeWidth={2} dot={false} />
+                  <Bar yAxisId="amount" dataKey="paid" fill="#a13b2b" radius={[3, 3, 0, 0]} />
+                  <Line yAxisId="amount" dataKey="received" stroke="#1a3d2a" strokeWidth={2} dot={false} />
+                  <Line yAxisId="amount" dataKey="net" stroke="#d4a574" strokeWidth={2} dot={false} />
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
@@ -247,43 +261,58 @@ export function FinancialAnalysis() {
               {analyticsQuery.data?.insights.map((insight, index) => (
                 <div
                   key={`${insight.title}-${index}`}
-                  className={cn("rounded-lg border px-3 py-2 text-sm", getInsightStyle(insight.type))}
+                  className={cn("rounded-md border px-3 py-2 text-sm", getInsightStyle(insight.type))}
                 >
-                  <p className="font-semibold">{insight.title}</p>
+                  <p
+                    className="font-semibold"
+                    style={{ fontFamily: "var(--font-serif)" }}
+                  >
+                    {insight.title}
+                  </p>
                   <p className="text-xs opacity-90">{insight.detail}</p>
                 </div>
               ))}
             </div>
 
-            <div className="rounded-lg border border-border/50 bg-secondary/20 p-3">
-              <p className="mb-2 text-sm font-semibold text-card-foreground">Daily Log Transactions</p>
-              <div className="max-h-56 space-y-1.5 overflow-y-auto pr-1">
+            <div className="kv-card p-4">
+              <div className="mb-2 flex items-center justify-between">
+                <p
+                  className="text-sm text-forest"
+                  style={{ fontFamily: "var(--font-serif)", fontWeight: 600 }}
+                >
+                  Daily Log Transactions
+                </p>
+                <p className="kv-microprint-sm text-muted-foreground">
+                  {(analyticsQuery.data?.logs?.length ?? 0)} entries
+                </p>
+              </div>
+              <div className="max-h-56 space-y-1.5 overflow-y-auto pr-1 bill-modal-scrollbar">
                 {(analyticsQuery.data?.logs ?? []).slice(0, 40).map((entry) => (
                   <div
                     key={entry.id}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/40 bg-secondary/30 px-2 py-1.5 text-xs"
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-background px-2 py-1.5 text-xs"
                   >
                     <span className="text-muted-foreground">
                       {formatDateTime(entry.log_date)}
-                      {entry.vendor_name ? ` • ${entry.vendor_name}` : ""}
-                      {entry.bill_id ? ` • Bill #${shortBillId(entry.bill_id)}` : ""}
-                      {entry.payment_mode ? ` • ${String(entry.payment_mode).toUpperCase()}` : ""}
+                      {entry.vendor_name ? ` · ${entry.vendor_name}` : ""}
+                      {entry.bill_id ? ` · Bill #${shortBillId(entry.bill_id)}` : ""}
+                      {entry.payment_mode ? ` · ${String(entry.payment_mode).toUpperCase()}` : ""}
                     </span>
                     <div className="flex items-center gap-2">
-                      <Badge
+                      <span
                         className={cn(
-                          "border",
+                          "rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider",
                           entry.log_type === "received"
-                            ? "border-cyan-500/40 bg-cyan-500/10 text-cyan-300"
-                            : "border-rose-500/40 bg-rose-500/10 text-rose-300"
+                            ? "border-forest/40 bg-forest/5 text-forest"
+                            : "border-destructive/40 bg-destructive/5 text-destructive"
                         )}
                       >
                         {entry.log_type}
-                      </Badge>
+                      </span>
                       <span
                         className={cn(
-                          "font-mono",
-                          entry.log_type === "received" ? "text-cyan-300" : "text-rose-300"
+                          "font-mono font-semibold",
+                          entry.log_type === "received" ? "text-forest" : "text-destructive"
                         )}
                       >
                         Rs {Number(entry.amount).toLocaleString("en-IN")}
@@ -293,13 +322,15 @@ export function FinancialAnalysis() {
                 ))}
 
                 {(analyticsQuery.data?.logs?.length ?? 0) === 0 && (
-                  <p className="text-xs text-muted-foreground">No transactions found for selected period.</p>
+                  <p className="kv-microprint-sm text-muted-foreground">
+                    No transactions for selected period.
+                  </p>
                 )}
               </div>
             </div>
           </>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   )
 }
